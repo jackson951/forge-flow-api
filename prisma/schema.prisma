@@ -1,0 +1,248 @@
+// FlowForge domain model (scope §10). Structure only — refine during Phase 0/1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum IntegrationProviderKey {
+  GITHUB
+  MICROSOFT
+  SLACK
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  NEEDS_ATTENTION
+  DISCONNECTED
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum NodeKind {
+  TRIGGER
+  ACTION
+  CONDITION
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  RETRYING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+model User {
+  id           String            @id @default(uuid()) @db.Uuid
+  email        String            @unique
+  name         String
+  passwordHash String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  memberships  WorkspaceMember[]
+  sessions     Session[]
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  refreshTokenHash String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Workspace {
+  id           String                  @id @default(uuid()) @db.Uuid
+  name         String
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  members      WorkspaceMember[]
+  connections  IntegrationConnection[]
+  workflows    Workflow[]
+  runs         WorkflowRun[]
+  webhookEvents WebhookEvent[]
+  auditEvents  AuditEvent[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @db.Uuid
+  userId      String        @db.Uuid
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model IntegrationConnection {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  workspaceId           String                 @db.Uuid
+  provider              IntegrationProviderKey
+  status                ConnectionStatus       @default(CONNECTED)
+  externalAccountId     String?
+  scopes                String[]
+  encryptedAccessToken  String
+  encryptedRefreshToken String?
+  tokenExpiresAt        DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  workspace             Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, externalAccountId])
+  @@index([workspaceId])
+}
+
+model Workflow {
+  id                 String            @id @default(uuid()) @db.Uuid
+  workspaceId        String            @db.Uuid
+  name               String
+  description        String?
+  status             WorkflowStatus    @default(DRAFT)
+  draftDefinition    Json?
+  publishedVersionId String?           @unique @db.Uuid
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions           WorkflowVersion[] @relation("WorkflowVersions")
+  publishedVersion   WorkflowVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+
+  @@index([workspaceId, status])
+}
+
+/// Immutable once published.
+model WorkflowVersion {
+  id          String         @id @default(uuid()) @db.Uuid
+  workflowId  String         @db.Uuid
+  version     Int
+  definition  Json
+  publishedAt DateTime       @default(now())
+  workflow    Workflow       @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  publishedOf Workflow?      @relation("PublishedVersion")
+  nodes       WorkflowNode[]
+  edges       WorkflowEdge[]
+  runs        WorkflowRun[]
+
+  @@unique([workflowId, version])
+}
+
+model WorkflowNode {
+  id        String          @id @default(uuid()) @db.Uuid
+  versionId String          @db.Uuid
+  nodeKey   String
+  kind      NodeKind
+  type      String
+  config    Json
+  positionX Float           @default(0)
+  positionY Float           @default(0)
+  version   WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, nodeKey])
+}
+
+model WorkflowEdge {
+  id        String          @id @default(uuid()) @db.Uuid
+  versionId String          @db.Uuid
+  fromKey   String
+  toKey     String
+  branch    String?
+  version   WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId])
+}
+
+model WorkflowRun {
+  id             String          @id @default(uuid()) @db.Uuid
+  workspaceId    String          @db.Uuid
+  versionId      String          @db.Uuid
+  webhookEventId String?         @unique @db.Uuid
+  status         RunStatus       @default(QUEUED)
+  triggerPayload Json?
+  errorMessage   String?
+  queuedAt       DateTime        @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  version        WorkflowVersion @relation(fields: [versionId], references: [id])
+  webhookEvent   WebhookEvent?   @relation(fields: [webhookEventId], references: [id])
+  steps          StepRun[]
+
+  @@index([workspaceId, status, queuedAt])
+  @@index([versionId])
+}
+
+model StepRun {
+  id           String      @id @default(uuid()) @db.Uuid
+  runId        String      @db.Uuid
+  nodeKey      String
+  sequence     Int
+  status       StepStatus  @default(PENDING)
+  attempt      Int         @default(1)
+  inputMeta    Json?
+  outputMeta   Json?
+  errorMessage String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  durationMs   Int?
+  run          WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, sequence])
+}
+
+/// Verified inbound delivery. Unique (provider, deliveryId) is the idempotency guard.
+model WebhookEvent {
+  id          String                 @id @default(uuid()) @db.Uuid
+  workspaceId String?                @db.Uuid
+  provider    IntegrationProviderKey
+  deliveryId  String
+  eventType   String
+  payload     Json
+  receivedAt  DateTime               @default(now())
+  workspace   Workspace?             @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  run         WorkflowRun?
+
+  @@unique([provider, deliveryId])
+}
+
+model AuditEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  actorUserId String?   @db.Uuid
+  action      String
+  targetType  String?
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
