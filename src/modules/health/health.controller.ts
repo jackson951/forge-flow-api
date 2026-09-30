@@ -1,7 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
+import { ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { Public } from '../../common/decorators';
-import { HealthService } from './health.service';
+import { HealthService, ReadinessReport } from './health.service';
 
 @ApiTags('Health')
 @Public()
@@ -9,15 +10,19 @@ import { HealthService } from './health.service';
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 
-  /** Liveness — the process is up. */
+  /** Liveness — the process is up. Does not touch dependencies. */
   @Get()
   live() {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
-  /** Readiness — dependencies (Postgres, Redis) are reachable. */
+  /** Readiness — PostgreSQL and Redis are reachable. */
   @Get('ready')
-  ready() {
-    return this.health.readiness();
+  @ApiResponse({ status: HttpStatus.OK, description: 'All critical dependencies are up' })
+  @ApiResponse({ status: HttpStatus.SERVICE_UNAVAILABLE, description: 'A dependency is down' })
+  async ready(@Res({ passthrough: true }) res: Response): Promise<ReadinessReport> {
+    const report = await this.health.readiness();
+    if (report.status !== 'ok') res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    return report;
   }
 }
