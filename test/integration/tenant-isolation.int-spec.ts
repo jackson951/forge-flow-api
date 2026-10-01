@@ -34,7 +34,8 @@ describe('Tenant isolation (integration)', () => {
     { pattern: /\/workflows\/:id(\/|$)/, param: 'id', id: bobWorkflowId },
   ];
 
-  const paramValue = (name: string) => (name === 'provider' ? 'GITHUB' : randomUUID());
+  const paramValue = (name: string) =>
+    name === 'provider' ? 'GITHUB' : name === 'version' ? '1' : randomUUID();
 
   const send = (route: RouteInfo, path: string, headers: Record<string, string> = {}) =>
     request(server)

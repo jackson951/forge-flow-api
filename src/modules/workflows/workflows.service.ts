@@ -3,7 +3,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { Prisma, Workflow, WorkflowStatus } from '@prisma/client';
 import { Cursor, decodeCursor, encodeCursor } from '../../common/utils/cursor';
@@ -16,6 +15,7 @@ import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
+import { TriggerRoutingService } from './trigger-routing.service';
 
 const SUMMARY_SELECT = {
   id: true,
@@ -55,6 +55,7 @@ export class WorkflowsService {
     private readonly prisma: PrismaService,
     private readonly validator: DefinitionValidatorService,
     private readonly audit: AuditService,
+    private readonly routing: TriggerRoutingService,
   ) {}
 
   async list(workspaceId: string, query: ListWorkflowsQueryDto): Promise<Page<WorkflowSummary>> {
@@ -188,7 +189,7 @@ export class WorkflowsService {
   async archive(workspaceId: string, userId: string, id: string): Promise<WorkflowSummary> {
     await this.findOwned(workspaceId, id);
     return this.prisma.$transaction(async (tx) => {
-      await tx.workflowTrigger.deleteMany({ where: { workflowId: id } });
+      await this.routing.deactivate(tx, id);
       const workflow = await tx.workflow.update({
         where: { id },
         data: { status: WorkflowStatus.ARCHIVED },
@@ -208,13 +209,17 @@ export class WorkflowsService {
     });
   }
 
-  /**
-   * Returns to PUBLISHED if a version is active, otherwise DRAFT. Re-activating triggers for
-   * the active version is part of publishing (Part 06).
-   */
+  /** Returns to PUBLISHED (re-activating the active version's triggers) or DRAFT. */
   async unarchive(workspaceId: string, userId: string, id: string): Promise<WorkflowSummary> {
     const current = await this.findOwned(workspaceId, id);
     return this.prisma.$transaction(async (tx) => {
+      if (current.activeVersionId) {
+        const active = await tx.workflowVersion.findUniqueOrThrow({
+          where: { id: current.activeVersionId },
+          select: { id: true, definition: true },
+        });
+        await this.routing.activate(tx, current, active);
+      }
       const workflow = await tx.workflow.update({
         where: { id },
         data: {
@@ -262,16 +267,6 @@ export class WorkflowsService {
       }
       throw err;
     }
-  }
-
-  async publish(workspaceId: string, id: string): Promise<never> {
-    await this.findOwned(workspaceId, id);
-    throw new NotImplementedException('Publishing arrives in Part 06');
-  }
-
-  async listVersions(workspaceId: string, id: string): Promise<never> {
-    await this.findOwned(workspaceId, id);
-    throw new NotImplementedException('Version history arrives in Part 06');
   }
 
   private async findOwned(workspaceId: string, id: string): Promise<Workflow> {

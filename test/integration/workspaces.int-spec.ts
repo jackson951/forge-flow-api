@@ -278,7 +278,9 @@ describe('Workspaces and members (integration)', () => {
 
       await api(member.accessToken).get(`/workspaces/${ws}/workflows`).expect(200);
       await api(member.accessToken).post(`/workspaces/${ws}/workflows/${wf}/publish`).expect(403);
-      await api(owner.accessToken).post(`/workspaces/${ws}/workflows/${wf}/publish`).expect(404);
+      await api(owner.accessToken)
+        .post(`/workspaces/${ws}/workflows/${wf}/publish`, { expectedRevision: 0 })
+        .expect(404);
       await api(member.accessToken).get(`/workspaces/${ws}/runs`).expect(501);
       await api(member.accessToken).post(`/workspaces/${ws}/runs/${wf}/retry`).expect(403);
       await api(member.accessToken)
