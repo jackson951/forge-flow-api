@@ -28,10 +28,30 @@ export class HealthService {
   async readiness(): Promise<ReadinessReport> {
     const [database, redis] = await Promise.all([
       this.check('database', () => this.prisma.$queryRaw`SELECT 1`),
-      this.check('redis', () => this.redis.ping()),
+      this.check('redis', () => this.pingRedis()),
     ]);
     const status = database.status === 'up' && redis.status === 'up' ? 'ok' : 'error';
     return { status, checks: { database, redis } };
+  }
+
+  /**
+   * The client fails fast while (re)connecting (offline queue disabled), so wait for the
+   * connection — bounded by the check timeout — instead of reporting a probe sent during
+   * startup as "down".
+   */
+  private async pingRedis(): Promise<unknown> {
+    if (this.redis.status === 'connecting' || this.redis.status === 'connect') {
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          this.redis.off('ready', done);
+          resolve();
+        };
+        const timer = setTimeout(done, DEPENDENCY_CHECK_TIMEOUT_MS);
+        this.redis.once('ready', done);
+      });
+    }
+    return this.redis.ping();
   }
 
   private async check(name: string, probe: () => Promise<unknown>): Promise<DependencyStatus> {
