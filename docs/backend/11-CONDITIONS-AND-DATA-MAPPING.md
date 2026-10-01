@@ -98,3 +98,5 @@ Parts 05, 08.
 ## Implementation Notes
 
 Replaces the scaffold `ConditionEvaluatorService` stub (`field/operator/value` shape).
+
+State after Part 08: the engine calls a `ValueResolver` port (currently `identityResolver`) before every step, and the built-in `condition` handler is a placeholder that fails with VALIDATION. This part implements the resolver and replaces the placeholder handler; the engine needs no changes.

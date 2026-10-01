@@ -35,6 +35,19 @@ export const envSchema = z
     REDIS_PORT: z.coerce.number().int().positive().default(6379),
     REDIS_PASSWORD: z.string().optional(),
 
+    /** BullMQ key prefix; tests use a unique one so they never share queues with dev. */
+    QUEUE_PREFIX: z
+      .string()
+      .regex(/^[A-Za-z0-9:_-]{1,64}$/)
+      .default('flowforge'),
+    QUEUE_JOB_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+    QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).default(2_000),
+    WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
+    NODE_TIMEOUT_MS: z.coerce.number().int().min(100).default(30_000),
+    /** QUEUED runs older than this are re-enqueued by the sweeper (lost-enqueue recovery). */
+    SWEEPER_STALE_AFTER_MS: z.coerce.number().int().min(1_000).default(60_000),
+    SWEEPER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
+
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_ACCESS_TTL: duration.default('15m'),
     JWT_REFRESH_SECRET: z.string().min(32),

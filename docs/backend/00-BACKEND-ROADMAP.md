@@ -13,9 +13,9 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 03 | [Authentication](03-AUTHENTICATION.md) | COMPLETE | All 10 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #3, `main`) |
 | 04 | [Workspaces and Authorization](04-WORKSPACES-AND-AUTHORIZATION.md) | COMPLETE | All 7 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #4, `main`) |
 | 05 | [Workflow Management](05-WORKFLOW-MANAGEMENT.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #5, `main`) |
-| 06 | [Workflow Versioning and Publishing](06-WORKFLOW-VERSIONING-AND-PUBLISHING.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-01; locked transactional publish, canonical hashing, routing table maintained. Not yet pushed/CI-verified |
-| 07 | [Queue and Worker Infrastructure](07-QUEUE-AND-WORKER-INFRASTRUCTURE.md) | NOT STARTED | BullMQ queue registered and worker entrypoint exists; no job contracts, retries classification or tests |
-| 08 | [Workflow Execution Engine](08-WORKFLOW-EXECUTION-ENGINE.md) | NOT STARTED | Contracts/registry skeleton; executor throws 501 |
+| 06 | [Workflow Versioning and Publishing](06-WORKFLOW-VERSIONING-AND-PUBLISHING.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #6, `main`) |
+| 07 | [Queue and Worker Infrastructure](07-QUEUE-AND-WORKER-INFRASTRUCTURE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01 (integration + live API/worker processes). Not yet pushed/CI-verified |
+| 08 | [Workflow Execution Engine](08-WORKFLOW-EXECUTION-ENGINE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01 (engine unit tests incl. crash/resume, integration with real worker). Built-in `condition` node is a placeholder until Part 11. Not yet pushed/CI-verified |
 | 09 | [Webhook Platform](09-WEBHOOK-PLATFORM.md) | NOT STARTED | Controller with raw body; service throws 501 |
 | 10 | [GitHub Integration](10-GITHUB-INTEGRATION.md) | NOT STARTED | Provider stub |
 | 11 | [Conditions and Data Mapping](11-CONDITIONS-AND-DATA-MAPPING.md) | NOT STARTED | Evaluator stub |
@@ -240,3 +240,4 @@ flowchart TD
 | 2026-10-01 | Part 03 CI green on GitHub. Part 04 implemented and verified → COMPLETE; scaffold routes moved under `/workspaces/:workspaceId`. Next: Part 05. |
 | 2026-10-01 | Part 04 CI green on GitHub. Part 05 implemented and verified → COMPLETE; fixed body-parser errors returning 500 (Part 01 code). Next: Part 06. |
 | 2026-10-01 | Part 05 CI green on GitHub. Part 06 implemented and verified → COMPLETE. Next: Part 07. |
+| 2026-10-01 | Part 06 CI green on GitHub. Parts 07 and 08 implemented and verified → COMPLETE. Next: Part 11 (completes conditions), then 09. |
