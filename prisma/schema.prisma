@@ -1,4 +1,10 @@
-// FlowForge domain model (scope §10). Structure only — refine during Phase 0/1.
+// FlowForge domain model. Design decisions: docs/backend/02-DATABASE-DOMAIN-MODEL.md
+//
+// Conventions: UUID ids, timestamptz(3) timestamps, createdAt everywhere, updatedAt on
+// mutable rows. Every tenant-owned row carries workspaceId or hangs off an immutable
+// parent that does (StepRun → WorkflowRun, IntegrationCredential → IntegrationConnection).
+// Constraints Prisma cannot express (WorkflowVersion immutability trigger, lowercase email
+// check) live as raw SQL in the migrations.
 
 generator client {
   provider = "prisma-client-js"
@@ -8,6 +14,8 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ── Enums ────────────────────────────────────────────────────────────────────
 
 enum WorkspaceRole {
   OWNER
@@ -29,14 +37,14 @@ enum ConnectionStatus {
 
 enum WorkflowStatus {
   DRAFT
-  ACTIVE
+  PUBLISHED
   ARCHIVED
 }
 
-enum NodeKind {
-  TRIGGER
-  ACTION
-  CONDITION
+enum TriggerSource {
+  WEBHOOK
+  MANUAL
+  RETRY
 }
 
 enum RunStatus {
@@ -56,40 +64,86 @@ enum StepStatus {
   SKIPPED
 }
 
-model User {
-  id           String            @id @default(uuid()) @db.Uuid
-  email        String            @unique
-  name         String
-  passwordHash String?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  memberships  WorkspaceMember[]
-  sessions     Session[]
+enum ErrorCategory {
+  VALIDATION
+  AUTHORIZATION
+  PROVIDER_AUTH
+  PROVIDER_RATE_LIMIT
+  PROVIDER_TIMEOUT
+  TRANSIENT_INFRASTRUCTURE
+  PERMANENT_PROVIDER_ERROR
+  UNCERTAIN_OUTCOME
+  CANCELLED
+  INTERNAL
 }
 
-model Session {
-  id               String    @id @default(uuid()) @db.Uuid
-  userId           String    @db.Uuid
-  refreshTokenHash String
-  expiresAt        DateTime
-  revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+enum WebhookDeliveryStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+// ── Identity ─────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased (enforced by CHECK constraint).
+  email        String   @unique
+  name         String
+  /// argon2id hash. Never selected into API responses.
+  passwordHash String
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  memberships       WorkspaceMember[]
+  refreshTokens     RefreshToken[]
+  createdWorkflows  Workflow[]              @relation("WorkflowCreatedBy")
+  publishedVersions WorkflowVersion[]       @relation("VersionPublishedBy")
+  connections       IntegrationConnection[] @relation("ConnectionCreatedBy")
+  oauthStates       OAuthState[]
+  auditEvents       AuditEvent[]            @relation("AuditActor")
+}
+
+/// Opaque refresh tokens, stored hashed. A rotation chain shares one familyId so
+/// reuse of a rotated token can revoke the whole family.
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  familyId     String    @db.Uuid
+  tokenHash    String    @unique
+  expiresAt    DateTime  @db.Timestamptz(3)
+  revokedAt    DateTime? @db.Timestamptz(3)
+  replacedById String?   @unique @db.Uuid
+  userAgent    String?
+  ipHash       String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("TokenRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces   RefreshToken? @relation("TokenRotation")
 
   @@index([userId])
+  @@index([familyId])
 }
 
+// ── Tenancy ──────────────────────────────────────────────────────────────────
+
 model Workspace {
-  id           String                  @id @default(uuid()) @db.Uuid
-  name         String
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-  members      WorkspaceMember[]
-  connections  IntegrationConnection[]
-  workflows    Workflow[]
-  runs         WorkflowRun[]
-  webhookEvents WebhookEvent[]
-  auditEvents  AuditEvent[]
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  members     WorkspaceMember[]
+  workflows   Workflow[]
+  versions    WorkflowVersion[]
+  triggers    WorkflowTrigger[]
+  runs        WorkflowRun[]
+  connections IntegrationConnection[]
+  oauthStates OAuthState[]
+  deliveries  WebhookDelivery[]
+  auditEvents AuditEvent[]
 }
 
 model WorkspaceMember {
@@ -97,152 +151,261 @@ model WorkspaceMember {
   workspaceId String        @db.Uuid
   userId      String        @db.Uuid
   role        WorkspaceRole @default(MEMBER)
-  createdAt   DateTime      @default(now())
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
+  @@index([userId])
 }
 
+// ── Workflows ────────────────────────────────────────────────────────────────
+
+/// Mutable workflow: metadata + the single editable draft.
+model Workflow {
+  id              String         @id @default(uuid()) @db.Uuid
+  workspaceId     String         @db.Uuid
+  name            String
+  description     String?
+  status          WorkflowStatus @default(DRAFT)
+  draftDefinition Json
+  /// Optimistic-concurrency counter for draft saves.
+  draftRevision   Int            @default(0)
+  activeVersionId String?        @unique @db.Uuid
+  createdById     String?        @db.Uuid
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User?             @relation("WorkflowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  activeVersion WorkflowVersion?  @relation("ActiveVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  versions      WorkflowVersion[] @relation("WorkflowVersions")
+  trigger       WorkflowTrigger?
+  runs          WorkflowRun[]
+
+  @@index([workspaceId, status, updatedAt])
+}
+
+/// Immutable published snapshot (UPDATE of the snapshot columns is rejected by a trigger).
+/// Deleting a version that runs reference is blocked (NoAction on WorkflowRun).
+model WorkflowVersion {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  workflowId     String   @db.Uuid
+  version        Int
+  schemaVersion  Int
+  definition     Json
+  /// sha256 of the canonical JSON definition.
+  definitionHash String
+  publishedAt    DateTime @default(now()) @db.Timestamptz(3)
+  publishedById  String?  @db.Uuid
+
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow    Workflow          @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  publishedBy User?             @relation("VersionPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+  activeFor   Workflow?         @relation("ActiveVersion")
+  triggers    WorkflowTrigger[]
+  runs        WorkflowRun[]
+
+  @@unique([workflowId, version])
+  @@index([workspaceId])
+}
+
+/// Routing index for webhook triggers of a workflow's active version.
+/// Rewritten on publish/archive in the same transaction.
+model WorkflowTrigger {
+  id                String                 @id @default(uuid()) @db.Uuid
+  workspaceId       String                 @db.Uuid
+  workflowId        String                 @unique @db.Uuid
+  workflowVersionId String                 @db.Uuid
+  provider          IntegrationProviderKey
+  eventType         String
+  /// Provider-specific routing key, e.g. "<installationId>:owner/repo".
+  resourceKey       String
+  connectionId      String?                @db.Uuid
+  createdAt         DateTime               @default(now()) @db.Timestamptz(3)
+
+  workspace  Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow   Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version    WorkflowVersion        @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  connection IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([provider, eventType, resourceKey])
+  @@index([workspaceId])
+}
+
+// ── Execution history ────────────────────────────────────────────────────────
+
+model WorkflowRun {
+  id                String         @id @default(uuid()) @db.Uuid
+  workspaceId       String         @db.Uuid
+  workflowId        String         @db.Uuid
+  workflowVersionId String         @db.Uuid
+  status            RunStatus      @default(QUEUED)
+  triggerSource     TriggerSource
+  /// Unique per workspace, e.g. "GITHUB:<deliveryId>:<workflowId>" or a random UUID for manual runs.
+  idempotencyKey    String
+  webhookDeliveryId String?        @db.Uuid
+  retryOfRunId      String?        @db.Uuid
+  /// Sanitised trigger payload (no secrets).
+  triggerInput      Json?
+  correlationId     String?
+  attemptCount      Int            @default(0)
+  lastErrorCategory ErrorCategory?
+  errorMessage      String?
+  lockedBy          String?
+  cancelRequestedAt DateTime?      @db.Timestamptz(3)
+  queuedAt          DateTime       @default(now()) @db.Timestamptz(3)
+  startedAt         DateTime?      @db.Timestamptz(3)
+  completedAt       DateTime?      @db.Timestamptz(3)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // NoAction (checked at end of statement): a workflow/version with runs cannot be deleted on
+  // its own, but deleting the whole workspace cascades through runs and versions together.
+  workflow        Workflow         @relation(fields: [workflowId], references: [id], onDelete: NoAction)
+  version         WorkflowVersion  @relation(fields: [workflowVersionId], references: [id], onDelete: NoAction)
+  webhookDelivery WebhookDelivery? @relation(fields: [webhookDeliveryId], references: [id], onDelete: SetNull)
+  retryOf         WorkflowRun?     @relation("RunRetries", fields: [retryOfRunId], references: [id], onDelete: SetNull)
+  retries         WorkflowRun[]    @relation("RunRetries")
+  steps           StepRun[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@index([workflowId, createdAt])
+  @@index([status, queuedAt])
+  @@index([webhookDeliveryId])
+}
+
+/// One row per node per run; retries of the same node increment attemptCount.
+model StepRun {
+  id              String         @id @default(uuid()) @db.Uuid
+  runId           String         @db.Uuid
+  nodeKey         String
+  nodeType        String
+  sequence        Int
+  status          StepStatus     @default(PENDING)
+  attemptCount    Int            @default(0)
+  sanitizedInput  Json?
+  sanitizedOutput Json?
+  errorCategory   ErrorCategory?
+  errorMessage    String?
+  /// Provider-side identifier of the side effect (e.g. Slack message ts).
+  externalRef     String?
+  startedAt       DateTime?      @db.Timestamptz(3)
+  completedAt     DateTime?      @db.Timestamptz(3)
+  durationMs      Int?
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  run WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, nodeKey])
+  @@index([runId, sequence])
+}
+
+// ── Integrations ─────────────────────────────────────────────────────────────
+
+/// Connected external account — metadata only. Secrets live in IntegrationCredential.
 model IntegrationConnection {
-  id                    String                 @id @default(uuid()) @db.Uuid
-  workspaceId           String                 @db.Uuid
-  provider              IntegrationProviderKey
-  status                ConnectionStatus       @default(CONNECTED)
-  externalAccountId     String?
-  scopes                String[]
-  encryptedAccessToken  String
-  encryptedRefreshToken String?
-  tokenExpiresAt        DateTime?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  workspace             Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                String                 @id @default(uuid()) @db.Uuid
+  workspaceId       String                 @db.Uuid
+  provider          IntegrationProviderKey
+  status            ConnectionStatus       @default(CONNECTED)
+  /// Provider account id (GitHub installation id, Slack team id, Entra object id).
+  externalAccountId String
+  accountLabel      String?
+  scopes            String[]
+  metadata          Json?
+  createdById       String?                @db.Uuid
+  lastUsedAt        DateTime?              @db.Timestamptz(3)
+  createdAt         DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime               @updatedAt @db.Timestamptz(3)
+
+  workspace  Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy  User?                  @relation("ConnectionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  credential IntegrationCredential?
+  triggers   WorkflowTrigger[]
 
   @@unique([workspaceId, provider, externalAccountId])
   @@index([workspaceId])
 }
 
-model Workflow {
-  id                 String            @id @default(uuid()) @db.Uuid
-  workspaceId        String            @db.Uuid
-  name               String
-  description        String?
-  status             WorkflowStatus    @default(DRAFT)
-  draftDefinition    Json?
-  publishedVersionId String?           @unique @db.Uuid
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  versions           WorkflowVersion[] @relation("WorkflowVersions")
-  publishedVersion   WorkflowVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+/// AES-256-GCM ciphertext only. Kept in its own table so a default include/select of a
+/// connection can never carry secrets.
+model IntegrationCredential {
+  id                    String    @id @default(uuid()) @db.Uuid
+  connectionId          String    @unique @db.Uuid
+  keyId                 String
+  encryptedAccessToken  String?
+  encryptedRefreshToken String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
 
-  @@index([workspaceId, status])
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 }
 
-/// Immutable once published.
-model WorkflowVersion {
-  id          String         @id @default(uuid()) @db.Uuid
-  workflowId  String         @db.Uuid
-  version     Int
-  definition  Json
-  publishedAt DateTime       @default(now())
-  workflow    Workflow       @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
-  publishedOf Workflow?      @relation("PublishedVersion")
-  nodes       WorkflowNode[]
-  edges       WorkflowEdge[]
-  runs        WorkflowRun[]
+/// Single-use OAuth state (stored as hash) bound to user, workspace and provider.
+model OAuthState {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  stateHash             String                 @unique
+  provider              IntegrationProviderKey
+  userId                String                 @db.Uuid
+  workspaceId           String                 @db.Uuid
+  encryptedCodeVerifier String?
+  expiresAt             DateTime               @db.Timestamptz(3)
+  consumedAt            DateTime?              @db.Timestamptz(3)
+  createdAt             DateTime               @default(now()) @db.Timestamptz(3)
 
-  @@unique([workflowId, version])
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
 
-model WorkflowNode {
-  id        String          @id @default(uuid()) @db.Uuid
-  versionId String          @db.Uuid
-  nodeKey   String
-  kind      NodeKind
-  type      String
-  config    Json
-  positionX Float           @default(0)
-  positionY Float           @default(0)
-  version   WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-
-  @@unique([versionId, nodeKey])
-}
-
-model WorkflowEdge {
-  id        String          @id @default(uuid()) @db.Uuid
-  versionId String          @db.Uuid
-  fromKey   String
-  toKey     String
-  branch    String?
-  version   WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-
-  @@index([versionId])
-}
-
-model WorkflowRun {
-  id             String          @id @default(uuid()) @db.Uuid
-  workspaceId    String          @db.Uuid
-  versionId      String          @db.Uuid
-  webhookEventId String?         @unique @db.Uuid
-  status         RunStatus       @default(QUEUED)
-  triggerPayload Json?
-  errorMessage   String?
-  queuedAt       DateTime        @default(now())
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  version        WorkflowVersion @relation(fields: [versionId], references: [id])
-  webhookEvent   WebhookEvent?   @relation(fields: [webhookEventId], references: [id])
-  steps          StepRun[]
-
-  @@index([workspaceId, status, queuedAt])
-  @@index([versionId])
-}
-
-model StepRun {
-  id           String      @id @default(uuid()) @db.Uuid
-  runId        String      @db.Uuid
-  nodeKey      String
-  sequence     Int
-  status       StepStatus  @default(PENDING)
-  attempt      Int         @default(1)
-  inputMeta    Json?
-  outputMeta   Json?
+/// Verified inbound provider delivery. Unique (provider, deliveryId) is the idempotency guard.
+/// workspaceId is nullable: a delivery is stored before routing and may match no workspace.
+model WebhookDelivery {
+  id           String                 @id @default(uuid()) @db.Uuid
+  provider     IntegrationProviderKey
+  deliveryId   String
+  eventType    String
+  workspaceId  String?                @db.Uuid
+  status       WebhookDeliveryStatus  @default(RECEIVED)
+  /// Normalised, size-limited event (never the raw body or headers).
+  payload      Json?
   errorMessage String?
-  startedAt    DateTime?
-  finishedAt   DateTime?
-  durationMs   Int?
-  run          WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  receivedAt   DateTime               @default(now()) @db.Timestamptz(3)
+  processedAt  DateTime?              @db.Timestamptz(3)
 
-  @@index([runId, sequence])
-}
-
-/// Verified inbound delivery. Unique (provider, deliveryId) is the idempotency guard.
-model WebhookEvent {
-  id          String                 @id @default(uuid()) @db.Uuid
-  workspaceId String?                @db.Uuid
-  provider    IntegrationProviderKey
-  deliveryId  String
-  eventType   String
-  payload     Json
-  receivedAt  DateTime               @default(now())
-  workspace   Workspace?             @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
-  run         WorkflowRun?
+  workspace Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  runs      WorkflowRun[]
 
   @@unique([provider, deliveryId])
+  @@index([receivedAt])
 }
 
+/// Append-only record of security-relevant actions. workspaceId is null for
+/// account-level events (e.g. failed login).
 model AuditEvent {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  actorUserId String?   @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String?  @db.Uuid
+  actorUserId String?  @db.Uuid
   action      String
   targetType  String?
   targetId    String?
   metadata    Json?
-  createdAt   DateTime  @default(now())
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ipHash      String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?      @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, createdAt])
+  @@index([actorUserId, createdAt])
 }

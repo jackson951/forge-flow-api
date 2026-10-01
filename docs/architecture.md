@@ -10,7 +10,7 @@ One NestJS codebase, two entrypoints:
 Both import `CoreModule` (config, logging, Prisma, queue, crypto) so infrastructure is defined once.
 
 ```
-Webhook → API /webhooks/:provider → verify → dedupe (WebhookEvent unique) → enqueue
+Webhook → API /webhooks/:provider → verify → dedupe (WebhookDelivery unique) → enqueue
                                                                               ↓
                                           Worker → WorkflowExecutor → NodeHandlers → GitHub / Graph / Slack / AI
 ```
