@@ -1,6 +1,6 @@
 # 04 — Workspaces and Authorization
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-01) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -42,7 +42,7 @@ Justification: MEMBERs can build but not change what runs in production or which
 ## Technical Requirements
 
 - **Routing convention:** all tenant resources live under `/api/v1/workspaces/:workspaceId/...`. The workspace is explicit in the URL, never implied by a token claim.
-- **`WorkspaceAccessGuard`:** reads `:workspaceId`, validates it as a UUID, loads the membership in one indexed query, returns 404 if absent, attaches `request.workspace = { id, role }`.
+- **`WorkspaceAccessGuard`:** registered **globally** (after `AuthGuard`) rather than per controller, so every route with a `:workspaceId` parameter is checked and a new controller cannot forget it. Reads `:workspaceId`, validates it as a UUID, loads the membership in one indexed query, returns 404 if absent, attaches `request.workspace = { workspaceId, userId, role }`. `@RequireRole` on a route without `:workspaceId` fails closed (500).
 - **`@RequireRole('ADMIN')`:** decorator + check inside the same guard using the role hierarchy `OWNER > ADMIN > MEMBER`.
 - **Resource scoping:** every service method takes `workspaceId` as the first argument and includes it in the `where` clause (`findFirst({ where: { id, workspaceId } })`). A shared helper throws `NotFoundException` when null. No service method loads a tenant resource by `id` alone.
 - **Authorization service:** `AuthorizationService.assertRole(membership, required)` and `canManageMember(actor, target, newRole)` hold rule logic so it is unit-testable without HTTP.
@@ -62,7 +62,7 @@ Justification: MEMBERs can build but not change what runs in production or which
 | PATCH | `/api/v1/workspaces/:workspaceId/members/:userId` | ADMIN / OWNER per matrix |
 | DELETE | `/api/v1/workspaces/:workspaceId/members/:userId` | ADMIN / OWNER per matrix, or self-leave |
 
-The scaffold's un-scoped routes (`/api/workflows`, `/api/runs`, `/api/integrations`, `/api/dashboard`) move under the workspace prefix in the parts that implement them.
+The scaffold's un-scoped routes moved under the workspace prefix in this part (their handlers still return 501 until Parts 05–17), with role requirements from the matrix already applied: `/workspaces/:workspaceId/workflows`, `/runs`, `/integrations`, `/dashboard`. Provider-level routes stay outside: `GET /integrations/providers` (authenticated) and `GET /integrations/:provider/callback` (public, state-authenticated).
 
 ## Database Changes
 
@@ -83,7 +83,7 @@ None beyond Part 02 (`Workspace`, `WorkspaceMember`, `AuditEvent`).
 
 ## Deliverables
 
-`WorkspacesModule` (controller/service), `MembersController`, `WorkspaceAccessGuard`, `@RequireRole`, `AuthorizationService`, `@CurrentWorkspace()` decorator, `test/integration/tenant-isolation.int-spec.ts`.
+`WorkspacesModule` (controller/service), `MembersController`/`MembersService`, global `WorkspaceAccessGuard`, `@RequireRole`, `WorkspacePolicy` (the spec's "authorization service": pure role rules), `@CurrentWorkspace()` decorator, `test/integration/tenant-isolation.int-spec.ts`.
 
 ## Acceptance Criteria
 
@@ -118,3 +118,48 @@ Parts 02, 03.
 
 - The scaffold's `AuthenticatedUser.workspaceId` field is removed; controllers use `@CurrentWorkspace()` instead.
 - The scaffold's `WorkspaceAccessGuard` stub (always false) is replaced.
+
+## Implementation Evidence
+
+Verified 2026-10-01 on branch `feat/part-04-workspaces` (from `main` at `0308b57`).
+
+### What was implemented
+
+| Item | Location |
+| --- | --- |
+| Workspace create/list/get/rename/delete | `src/modules/workspaces/workspaces.controller.ts`, `workspaces.service.ts` |
+| Member list/add/change role/remove/leave, last-owner protection, per-workspace row lock, actor role re-read inside the transaction | `members.controller.ts`, `members.service.ts` |
+| Pure role rules | `workspace-policy.ts` |
+| Global tenant guard (404 non-member/malformed id, 403 insufficient role) | `src/common/guards/workspace-access.guard.ts`, registered in `app.module.ts` |
+| `@RequireRole`, `@CurrentWorkspace` | `src/common/decorators/` |
+| Scaffold workflow/run/integration/dashboard routes moved under `/workspaces/:workspaceId` with roles; interim `pendingWorkspaceScope` from Part 03 removed | `src/modules/{workflows,runs,integrations,dashboard}/*.controller.ts` |
+| Audit: `workspace.created/renamed/deleted`, `member.added/role_changed/removed/left` | services |
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint, typecheck, build | pass |
+| `npm test` | 101 passed (incl. 36 policy cases, 7 guard cases) |
+| `npm run test:e2e` | 14 passed |
+| `npm run test:int` | 108 passed |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-04.1 | PASS | Integration: 201, role OWNER, membership row + audit event |
+| AC-04.2 | PASS | Integration: member sees exactly personal + shared workspace with correct roles; isolation suite: Alice's list contains only her workspace |
+| AC-04.3 | PASS | Isolation suite discovers all **26** `:workspaceId` routes from the live router and calls each as a non-member → all 404; Bob's workspace and memberships unchanged afterwards. Unauthenticated → all 401; malformed ids → all 404 |
+| AC-04.4 | PASS | Alice changing/removing Bob's membership through her own workspace path → 404, Bob's membership unchanged. Foreign-workspace 404 body identical to non-existent-workspace 404 |
+| AC-04.5 | PASS | Integration: MEMBER 403 on rename/add/change/remove and on publish/retry/connect; ADMIN 403 on delete workspace, granting OWNER, touching an OWNER; OWNER can grant OWNER |
+| AC-04.6 | PASS | Integration: demoting or removing the last OWNER → 409; allowed once a second owner exists. Concurrent mutual demotion of two owners → exactly one owner remains |
+| AC-04.7 | PASS | All checks use Supertest against the HTTP API, no frontend involved |
+
+**Mutation check:** with the global guard temporarily removed from `app.module.ts`, the isolation suite failed (3 of 7 tests: cross-tenant, malformed ids, foreign member). With it restored, all pass. This shows the suite catches the regression it exists for.
+
+### Notes
+
+- In the concurrent demotion test the losing request gets **403**, not 409: it waits for the workspace lock, re-reads its own role inside the transaction, finds it was just demoted to ADMIN, and may no longer touch an OWNER. That is the stale-role protection working as intended.
+- Membership is checked with one indexed lookup per workspace-scoped request; there is no caching, so removals and demotions take effect on the next request (tested).
+- Adding a member reveals to ADMIN+ whether an email is registered (404). Accepted; email invitations are out of scope.
