@@ -1,0 +1,4 @@
+# Keep LF everywhere (matches Prettier) regardless of core.autocrlf on Windows.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
