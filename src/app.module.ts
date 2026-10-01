@@ -3,6 +3,7 @@ import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AuthGuard } from './common/guards/auth.guard';
+import { WorkspaceAccessGuard } from './common/guards/workspace-access.guard';
 import { createValidationPipe } from './common/pipes/validation.pipe';
 import { AppConfigService } from './config/app-config.service';
 import { CoreModule } from './core/core.module';
@@ -44,6 +45,8 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
+    // Runs after AuthGuard: checks membership/role on every route with a :workspaceId param.
+    { provide: APP_GUARD, useClass: WorkspaceAccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     {
       provide: APP_PIPE,

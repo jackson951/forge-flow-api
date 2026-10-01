@@ -2,7 +2,7 @@
 
 Backend for **FlowForge** — an integration & workflow automation platform. NestJS 11 · TypeScript · PostgreSQL/Prisma · Redis/BullMQ.
 
-> Scaffold stage: structure, wiring and contracts are in place; business logic is not. Unimplemented endpoints return `501 Not Implemented`, and every non-`@Public()` route returns `401` until auth is built (secure by default).
+> Status: foundation, data model, authentication and workspace authorization are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
 
 ## Quick start
 
@@ -38,13 +38,15 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 
 | Route | Module |
 | --- | --- |
-| `/auth/*` | auth |
-| `/workspaces` | workspaces |
-| `/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/duplicate`, `/archive`) | workflows |
-| `/runs` (+ `/retry`, `/cancel`) | runs |
-| `/integrations` (+ `/:provider/connect`, `/:provider/callback`) | integrations |
+| `/auth/*` (register, login, refresh, logout, logout-all, me) | auth |
+| `/workspaces`, `/workspaces/:workspaceId` | workspaces |
+| `/workspaces/:workspaceId/members` (+ `/:userId`) | workspaces |
+| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/duplicate`, `/archive`) | workflows |
+| `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |
+| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`) | integrations |
+| `/integrations/providers`, `/integrations/:provider/callback` | integrations |
+| `/workspaces/:workspaceId/dashboard` | dashboard |
 | `/webhooks/:provider` | webhooks |
-| `/dashboard` | dashboard |
-| `/health` | health |
+| `/health`, `/health/ready` | health |
 
 See `docs/architecture.md` for the process split and folder map.

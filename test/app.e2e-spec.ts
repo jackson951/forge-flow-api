@@ -57,7 +57,7 @@ describe('Foundation (e2e)', () => {
     });
 
     it('protected routes stay secure by default (401 envelope)', async () => {
-      const res = await http.get('/api/v1/workflows').expect(401);
+      const res = await http.get('/api/v1/workspaces').expect(401);
       expect(res.body).toMatchObject({ statusCode: 401, error: 'Unauthorized' });
     });
 

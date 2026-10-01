@@ -9,35 +9,39 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { pendingWorkspaceScope } from '../../common/utils/pending-workspace-scope';
+import { CurrentWorkspace, RequireRole } from '../../common/decorators';
+import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
 import { ListRunsQueryDto } from './dto/list-runs-query.dto';
 import { RunsService } from './runs.service';
 
+/** Handlers arrive in Part 16; roles follow the Part 04 matrix. */
 @ApiTags('Runs')
 @ApiBearerAuth()
-@Controller('runs')
+@Controller('workspaces/:workspaceId/runs')
 export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get()
-  list(@Query() query: ListRunsQueryDto) {
-    return this.runs.list(pendingWorkspaceScope(), query);
+  list(@CurrentWorkspace() ws: WorkspaceAccess, @Query() query: ListRunsQueryDto) {
+    return this.runs.list(ws.workspaceId, query);
   }
 
   @Get(':id')
-  get(@Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.get(pendingWorkspaceScope(), id);
+  get(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.get(ws.workspaceId, id);
   }
 
+  @RequireRole('ADMIN')
   @HttpCode(HttpStatus.ACCEPTED)
   @Post(':id/retry')
-  retry(@Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.retry(pendingWorkspaceScope(), id);
+  retry(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.retry(ws.workspaceId, id);
   }
 
+  @RequireRole('ADMIN')
   @HttpCode(HttpStatus.OK)
   @Post(':id/cancel')
-  cancel(@Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.cancel(pendingWorkspaceScope(), id);
+  cancel(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.cancel(ws.workspaceId, id);
   }
 }
