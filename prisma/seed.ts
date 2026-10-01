@@ -1,12 +1,13 @@
 import { PrismaClient, WorkspaceRole } from '@prisma/client';
+import * as argon2 from 'argon2';
 
 /** Development-only demo data. Idempotent: safe to run repeatedly. */
 
 export const DEMO_EMAIL = 'demo@flowforge.local';
 
 /**
- * Not a valid argon2 hash, so the demo account cannot log in until Part 03 (authentication)
- * provides real password hashing. The `!` prefix follows the /etc/shadow "locked" convention.
+ * Not a valid argon2 hash: without SEED_DEMO_PASSWORD the demo account cannot log in.
+ * The `!` prefix follows the /etc/shadow "locked" convention. No password is committed.
  */
 export const UNUSABLE_PASSWORD_HASH = '!seed-account-login-disabled';
 
@@ -25,12 +26,20 @@ const demoDefinition = {
   edges: [{ from: 'trigger', to: 'log' }],
 };
 
-export async function seed(prisma: PrismaClient): Promise<void> {
+/** Uses SEED_DEMO_PASSWORD (min 12 chars) if provided, otherwise a locked account. */
+export async function demoPasswordHash(password: string | undefined): Promise<string> {
+  if (!password) return UNUSABLE_PASSWORD_HASH;
+  if (password.length < 12) throw new Error('SEED_DEMO_PASSWORD must be at least 12 characters');
+  return argon2.hash(password, { type: argon2.argon2id });
+}
+
+export async function seed(prisma: PrismaClient, demoPassword?: string): Promise<void> {
+  const passwordHash = await demoPasswordHash(demoPassword);
   await prisma.$transaction(async (tx) => {
     const user = await tx.user.upsert({
       where: { email: DEMO_EMAIL },
-      update: {},
-      create: { email: DEMO_EMAIL, name: 'Demo User', passwordHash: UNUSABLE_PASSWORD_HASH },
+      update: demoPassword ? { passwordHash } : {},
+      create: { email: DEMO_EMAIL, name: 'Demo User', passwordHash },
     });
 
     const owned = await tx.workspaceMember.findFirst({
@@ -59,7 +68,7 @@ async function main(): Promise<void> {
   assertSeedAllowed(process.env.NODE_ENV);
   const prisma = new PrismaClient();
   try {
-    await seed(prisma);
+    await seed(prisma, process.env.SEED_DEMO_PASSWORD);
     console.log(`Seeded demo workspace for ${DEMO_EMAIL}`);
   } finally {
     await prisma.$disconnect();

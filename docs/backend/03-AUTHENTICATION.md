@@ -1,6 +1,6 @@
 # 03 — Authentication
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-01) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -23,7 +23,7 @@ Register, login, refresh, logout, logout-all, current user; password hashing; JW
 | FR-03.3 | Login with correct credentials returns an access token and a refresh token. |
 | FR-03.4 | Login with an unknown email or wrong password returns the same `401` message and similar timing. |
 | FR-03.5 | Refresh exchanges a valid refresh token for a new pair; the old refresh token is revoked (rotation). |
-| FR-03.6 | Presenting an already-rotated refresh token revokes the entire token family (reuse detection) and returns `401`. |
+| FR-03.6 | Presenting an already-rotated refresh token revokes the entire token family (reuse detection) and returns `401`. Exception: within a 10-second grace window after rotation it is treated as a lost race (second tab, client retry) and rejected with `401` **without** revoking the family. The presenter never receives tokens either way. |
 | FR-03.7 | Logout revokes the presented refresh token's family. Logout-all revokes every refresh token of the user. |
 | FR-03.8 | `GET /auth/me` returns the authenticated user's public profile. |
 | FR-03.9 | Access tokens expire after `JWT_ACCESS_TTL` (default 15 min); refresh tokens after `JWT_REFRESH_TTL` (default 7 days). |
@@ -32,11 +32,11 @@ Register, login, refresh, logout, logout-all, current user; password hashing; JW
 
 - **Hashing:** argon2id (`argon2` package) with library defaults ≥ OWASP minimums. A dummy hash is verified when the email is unknown to equalise timing.
 - **Access token:** JWT HS256 signed with `JWT_ACCESS_SECRET`; claims `sub` (userId), `iat`, `exp`, `typ: "access"`; issuer/audience set and verified. No workspace claim — workspace access is resolved per request (Part 04), so role changes take effect immediately.
-- **Refresh token:** opaque 256-bit random value (base64url), not a JWT. Stored as SHA-256 hash in `RefreshToken` with `familyId`. Rotation marks the old row `revokedAt` + `replacedById`.
+- **Refresh token:** opaque 256-bit random value (base64url), not a JWT. Stored as an HMAC-SHA256 hash keyed with `JWT_REFRESH_SECRET` (so a leaked table alone can't be matched against tokens) in `RefreshToken` with `familyId`. Rotation marks the old row `revokedAt` + `replacedById`.
 - **Transport:** refresh token returned in the JSON body and also set as an `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth` cookie. The refresh endpoint accepts either (cookie preferred). Access token is returned in the body only; clients send `Authorization: Bearer`.
 - **Guard:** the global `AuthGuard` verifies the bearer token, loads nothing from the DB on the hot path, and attaches `{ userId }` to `request.user`. `@Public()` bypasses it.
 - **Concurrency:** rotation uses a conditional update (`WHERE id = ? AND revokedAt IS NULL`) so two simultaneous refreshes with the same token cannot both succeed.
-- **Throttling:** `POST /auth/login` 5/min per IP+email, `POST /auth/register` 5/min per IP, `POST /auth/refresh` 30/min per IP (Part 18 moves storage to Redis).
+- **Throttling:** `POST /auth/login` 5/min per IP+email, `POST /auth/register` 5/min per IP, `POST /auth/refresh` 30/min per IP. `THROTTLE_ENABLED=false` disables limits for tests; the env schema rejects that in production. The additional 20/min-per-IP login limit and Redis-backed storage are Part 18.
 
 ## API Changes
 
@@ -110,3 +110,57 @@ Parts 01, 02.
 
 - Existing `RegisterDto`/`LoginDto` are reused; add `@Transform` for email normalisation.
 - Use `@nestjs/jwt` for signing/verification.
+
+## Implementation Evidence
+
+Verified 2026-10-01 on branch `feat/part-03-authentication` (from `main` at `99ed19d`).
+
+### What was implemented
+
+| Item | Location |
+| --- | --- |
+| Register / login / refresh / logout / logout-all / me | `src/modules/auth/auth.controller.ts`, `auth.service.ts` |
+| argon2id hashing (m=64 MiB, t=3, p=4) + dummy verification for unknown emails | `src/modules/auth/password.service.ts` |
+| HS256 access tokens (`typ`, `iss`, `aud` checked, algorithm pinned); opaque refresh tokens, HMAC-hashed | `src/modules/auth/token.service.ts` |
+| Rotation with conditional claim, family revocation on reuse, 10 s grace for races | `AuthService.refresh` |
+| HttpOnly, Secure, SameSite=Strict refresh cookie on `/api/v1/auth`; body transport also accepted | `src/modules/auth/refresh-cookie.ts` |
+| Stateless global `AuthGuard` (bearer verification, no DB lookup) | `src/common/guards/auth.guard.ts` |
+| Audit events: `auth.register`, `auth.login.failed` (email stored only as a hash), `auth.refresh.reuse_detected`, `auth.logout_all` | `src/modules/audit/*` |
+| Config: TTL format validation, `JWT_ISSUER`/`JWT_AUDIENCE`, `THROTTLE_ENABLED` (cannot be disabled in production) | `src/config/*` |
+| Seed: optional `SEED_DEMO_PASSWORD` makes the demo account usable; no password committed | `prisma/seed.ts`, `.env.example` |
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, `npm run lint`, `typecheck`, `build` | pass (0 lint problems) |
+| `npm test` | 65 passed |
+| `npm run test:e2e` | 14 passed (3 consecutive runs, ~10 s each) |
+| `npm run test:int` | 87 passed (auth suite repeated 3× without failures) |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-03.1 | PASS | Integration: 201 with user + tokens, cookie flags asserted, argon2id hash stored, personal workspace with OWNER membership, audit row. Live server: 201 |
+| AC-03.2 | PASS | Integration: upper-cased duplicate → 409 |
+| AC-03.3 | PASS | Integration + live: 200 with tokens |
+| AC-03.4 | PASS | Integration: wrong password and unknown email return identical status/error/message; audit rows contain neither the email nor the password |
+| AC-03.5 | PASS | Integration: missing, malformed, wrong scheme, expired, refresh-token-as-access, deleted user → 401. Unit: other secret/issuer/audience, `alg: none`, wrong `typ` rejected |
+| AC-03.6 | PASS | Integration: new pair, old token 401; cookie transport. Live: same |
+| AC-03.7 | PASS | Integration: replay after grace → family revoked (0 active tokens) + audit; replay within grace → 401 but session survives |
+| AC-03.8 | PASS | Integration: logout kills that session only and clears the cookie; logout-all kills every refresh token; logout idempotent. Live: refresh after logout → 401 |
+| AC-03.9 | PASS | Every response body in the auth suite checked for `passwordHash` / `$argon2`; live responses checked too |
+| AC-03.10 | PASS | Integration with throttling on: 6th login for the same IP+email → 429 with `Retry-After`; another email still allowed; 6th registration → 429 |
+
+### Design changes found during implementation
+
+- **Grace window for refresh reuse.** The first implementation revoked the whole family whenever a rotated token came back. The concurrency test showed that a legitimate race (two tabs or a retry, where the loser arrives just after the winner commits) logged the user out completely. Fixed with `REUSE_GRACE_MS = 10 s`.
+- **Readiness flake (Part 01 code).** With auth wired in, e2e intermittently saw Redis "down" right after boot. The Redis client fails fast while connecting, so the readiness check now waits for the connection within its 2 s timeout (unit-tested, listener cleaned up).
+
+### Known limitations
+
+- Access tokens remain valid until expiry (max 15 min) after logout; a test documents this.
+- Duplicate-email `409` allows account enumeration through registration, mitigated by the register rate limit (accepted trade-off).
+- Interim: the scaffold workflow/run/integration/dashboard routes read a workspace from token claims that real tokens deliberately don't carry. Until Part 04 they return 501 to authenticated users (`src/common/utils/pending-workspace-scope.ts`).
+- Rate-limit storage is in memory (per instance) until Part 18.

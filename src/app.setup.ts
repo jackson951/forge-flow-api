@@ -1,6 +1,7 @@
 import { VersioningType } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { REQUEST_ID_HEADER } from './common/constants';
 import { AppConfigService } from './config/app-config.service';
@@ -17,6 +18,7 @@ export function configureApp(app: NestExpressApplication): void {
 
   app.disable('x-powered-by');
   app.use(helmet());
+  app.use(cookieParser());
   app.enableCors({
     origin: config.corsOrigins,
     credentials: true,

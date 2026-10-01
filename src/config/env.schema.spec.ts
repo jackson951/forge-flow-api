@@ -27,6 +27,15 @@ describe('validateEnv', () => {
     );
   });
 
+  it('validates token lifetimes', () => {
+    expect(validateEnv({ ...base, JWT_ACCESS_TTL: '10m' }).JWT_ACCESS_TTL).toBe('10m');
+    expect(() => validateEnv({ ...base, JWT_ACCESS_TTL: '15 minutes' })).toThrow(/JWT_ACCESS_TTL/);
+  });
+
+  it('allows disabling rate limiting outside production', () => {
+    expect(validateEnv({ ...base, THROTTLE_ENABLED: 'false' }).THROTTLE_ENABLED).toBe(false);
+  });
+
   it('rejects an invalid enum value', () => {
     expect(() => validateEnv({ ...base, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
   });
@@ -48,6 +57,10 @@ describe('validateEnv', () => {
       expect(() => validateEnv({ ...prod, JWT_REFRESH_SECRET: base.JWT_ACCESS_SECRET })).toThrow(
         /JWT_REFRESH_SECRET: must differ/,
       );
+    });
+
+    it('refuses to disable rate limiting', () => {
+      expect(() => validateEnv({ ...prod, THROTTLE_ENABLED: 'false' })).toThrow(/THROTTLE_ENABLED/);
     });
 
     it('rejects wildcard CORS origins', () => {

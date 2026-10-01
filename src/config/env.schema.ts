@@ -5,6 +5,9 @@ const booleanString = z
   .transform((v) => v === 'true')
   .optional();
 
+/** Durations such as "900s", "15m", "12h", "7d". */
+const duration = z.string().regex(/^\d+[smhd]$/, 'must look like 900s, 15m, 12h or 7d');
+
 /** Prefix used by `.env.example` placeholders; never acceptable in production. */
 const PLACEHOLDER_PREFIX = 'change-me';
 
@@ -23,6 +26,8 @@ export const envSchema = z
     CORS_ORIGINS: z.string().default('http://localhost:5173'),
     /** Defaults to enabled outside production. */
     SWAGGER_ENABLED: booleanString,
+    /** Rate limiting; may only be disabled outside production (used by tests). */
+    THROTTLE_ENABLED: booleanString,
 
     DATABASE_URL: z.string().url(),
 
@@ -31,9 +36,11 @@ export const envSchema = z
     REDIS_PASSWORD: z.string().optional(),
 
     JWT_ACCESS_SECRET: z.string().min(32),
-    JWT_ACCESS_TTL: z.string().default('15m'),
+    JWT_ACCESS_TTL: duration.default('15m'),
     JWT_REFRESH_SECRET: z.string().min(32),
-    JWT_REFRESH_TTL: z.string().default('7d'),
+    JWT_REFRESH_TTL: duration.default('7d'),
+    JWT_ISSUER: z.string().default('flowforge'),
+    JWT_AUDIENCE: z.string().default('flowforge-api'),
 
     ENCRYPTION_KEY: z.string().optional(),
 
@@ -69,6 +76,13 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['JWT_REFRESH_SECRET'],
         message: 'must differ from JWT_ACCESS_SECRET',
+      });
+    }
+    if (env.THROTTLE_ENABLED === false) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['THROTTLE_ENABLED'],
+        message: 'rate limiting cannot be disabled in production',
       });
     }
     if (env.CORS_ORIGINS.split(',').some((o) => o.trim() === '*')) {
