@@ -1,9 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { configureApp } from './app.setup';
 import { AppConfigService } from './config/app-config.service';
 
 async function bootstrap(): Promise<void> {
@@ -13,26 +12,13 @@ async function bootstrap(): Promise<void> {
   });
 
   app.useLogger(app.get(Logger));
-  const config = app.get(AppConfigService);
-  const prefix = config.get('API_PREFIX');
-
-  app.disable('x-powered-by');
-  app.use(helmet());
-  app.enableCors({ origin: config.corsOrigins, credentials: true });
-  app.setGlobalPrefix(prefix);
+  configureApp(app);
+  // SIGTERM/SIGINT → stop accepting connections, run shutdown hooks (Prisma, Redis, queues).
   app.enableShutdownHooks();
 
-  if (!config.isProduction) {
-    const doc = new DocumentBuilder()
-      .setTitle('FlowForge API')
-      .setDescription('Integration & workflow automation platform')
-      .setVersion('0.1.0')
-      .addBearerAuth()
-      .build();
-    SwaggerModule.setup(`${prefix}/docs`, app, SwaggerModule.createDocument(app, doc));
-  }
-
+  const config = app.get(AppConfigService);
   await app.listen(config.get('PORT'));
+  app.get(Logger).log(`FlowForge API listening on port ${config.get('PORT')}`);
 }
 
 void bootstrap();

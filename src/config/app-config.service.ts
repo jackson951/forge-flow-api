@@ -15,6 +15,10 @@ export class AppConfigService {
     return this.get('NODE_ENV') === 'production';
   }
 
+  get swaggerEnabled(): boolean {
+    return this.get('SWAGGER_ENABLED') ?? !this.isProduction;
+  }
+
   get corsOrigins(): string[] {
     return this.get('CORS_ORIGINS')
       .split(',')
