@@ -13,74 +13,87 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { CurrentWorkspace, RequireRole } from '../../common/decorators';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { pendingWorkspaceScope } from '../../common/utils/pending-workspace-scope';
+import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { WorkflowsService } from './workflows.service';
 
+/** Roles follow the Part 04 matrix; the handlers themselves arrive in Parts 05–06. */
 @ApiTags('Workflows')
 @ApiBearerAuth()
-@Controller('workflows')
+@Controller('workspaces/:workspaceId/workflows')
 export class WorkflowsController {
   constructor(private readonly workflows: WorkflowsService) {}
 
   @Get()
-  list(@Query() query: PaginationQueryDto) {
-    return this.workflows.list(pendingWorkspaceScope(), query);
+  list(@CurrentWorkspace() ws: WorkspaceAccess, @Query() query: PaginationQueryDto) {
+    return this.workflows.list(ws.workspaceId, query);
   }
 
   @Get(':id')
-  get(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.get(pendingWorkspaceScope(), id);
+  get(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.get(ws.workspaceId, id);
   }
 
   @Post()
-  create(@Body() dto: CreateWorkflowDto) {
-    return this.workflows.create(pendingWorkspaceScope(), dto);
+  create(@CurrentWorkspace() ws: WorkspaceAccess, @Body() dto: CreateWorkflowDto) {
+    return this.workflows.create(ws.workspaceId, dto);
   }
 
   @Patch(':id')
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateWorkflowDto) {
-    return this.workflows.update(pendingWorkspaceScope(), id, dto);
+  update(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateWorkflowDto,
+  ) {
+    return this.workflows.update(ws.workspaceId, id, dto);
   }
 
   @Put(':id/draft')
-  saveDraft(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SaveDraftDto) {
-    return this.workflows.saveDraft(pendingWorkspaceScope(), id, dto);
+  saveDraft(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SaveDraftDto,
+  ) {
+    return this.workflows.saveDraft(ws.workspaceId, id, dto);
   }
 
   @HttpCode(HttpStatus.OK)
   @Post(':id/validate')
-  validate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.validate(pendingWorkspaceScope(), id);
+  validate(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.validate(ws.workspaceId, id);
   }
 
+  @RequireRole('ADMIN')
   @Post(':id/publish')
-  publish(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.publish(pendingWorkspaceScope(), id);
+  publish(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.publish(ws.workspaceId, id);
   }
 
   @Get(':id/versions')
-  versions(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.listVersions(pendingWorkspaceScope(), id);
+  versions(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.listVersions(ws.workspaceId, id);
   }
 
   @Post(':id/duplicate')
-  duplicate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.duplicate(pendingWorkspaceScope(), id);
+  duplicate(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.duplicate(ws.workspaceId, id);
   }
 
+  @RequireRole('ADMIN')
   @HttpCode(HttpStatus.OK)
   @Post(':id/archive')
-  archive(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.archive(pendingWorkspaceScope(), id);
+  archive(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.archive(ws.workspaceId, id);
   }
 
+  @RequireRole('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id')
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.remove(pendingWorkspaceScope(), id);
+  remove(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.remove(ws.workspaceId, id);
   }
 }
