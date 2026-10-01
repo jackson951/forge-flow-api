@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import Redis from 'ioredis';
+import { EventEmitter } from 'node:events';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { DEPENDENCY_CHECK_TIMEOUT_MS, HealthService } from './health.service';
 
@@ -48,5 +49,22 @@ describe('HealthService.readiness', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('waits for a connecting Redis client instead of reporting it down', async () => {
+    const client = Object.assign(new EventEmitter(), {
+      status: 'connecting',
+      ping: jest.fn(() => Promise.resolve('PONG')),
+    });
+    const prisma = { $queryRaw: jest.fn(ok) } as unknown as PrismaService;
+    const pending = new HealthService(prisma, client as unknown as Redis).readiness();
+    setTimeout(() => {
+      client.status = 'ready';
+      client.emit('ready');
+    }, 50);
+
+    const report = await pending;
+    expect(report.checks.redis.status).toBe('up');
+    expect(client.listenerCount('ready')).toBe(0);
   });
 });

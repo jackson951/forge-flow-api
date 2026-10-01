@@ -200,4 +200,4 @@ Verified 2026-10-01 on branch `feat/part-02-domain-model` (based on `feat/part-0
 
 - `prisma generate` could not replace the query-engine DLL because a separately running `npm start` process (started 2026-09-30 13:13, not by this work) has it loaded. The generated client JS/types were updated, and the existing engine binary is byte-identical to the package's, so nothing is stale. That old server is running the pre-Part-02 build against the new schema and should be restarted.
 - `prisma migrate dev` cannot run non-interactively, so the migration was generated with `prisma migrate diff` against a temporary shadow database, which was dropped afterwards.
-- The CI workflow (now also running `test:int`) has not run on GitHub yet.
+- CI (including `test:int`) confirmed green on GitHub Actions for PR #2 and `main` (2026-10-01).

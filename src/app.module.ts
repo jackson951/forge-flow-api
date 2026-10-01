@@ -4,7 +4,9 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AuthGuard } from './common/guards/auth.guard';
 import { createValidationPipe } from './common/pipes/validation.pipe';
+import { AppConfigService } from './config/app-config.service';
 import { CoreModule } from './core/core.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -20,7 +22,14 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 @Module({
   imports: [
     CoreModule,
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    ThrottlerModule.forRootAsync({
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService) => ({
+        throttlers: [{ ttl: 60_000, limit: 100 }],
+        skipIf: () => !config.throttleEnabled,
+      }),
+    }),
+    AuditModule,
     HealthModule,
     AuthModule,
     UsersModule,
