@@ -30,6 +30,18 @@ export class AppConfigService {
       .filter(Boolean);
   }
 
+  get queue() {
+    return {
+      prefix: this.get('QUEUE_PREFIX'),
+      attempts: this.get('QUEUE_JOB_ATTEMPTS'),
+      backoffMs: this.get('QUEUE_BACKOFF_MS'),
+      concurrency: this.get('WORKER_CONCURRENCY'),
+      nodeTimeoutMs: this.get('NODE_TIMEOUT_MS'),
+      sweeperStaleAfterMs: this.get('SWEEPER_STALE_AFTER_MS'),
+      sweeperIntervalMs: this.get('SWEEPER_INTERVAL_MS'),
+    };
+  }
+
   get redis() {
     return {
       host: this.get('REDIS_HOST'),

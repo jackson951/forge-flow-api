@@ -1,6 +1,6 @@
 # 07 — Queue and Worker Infrastructure
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-01) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -42,7 +42,7 @@ Queue configuration, job contracts, producer service, worker entrypoint, process
 
 | Method | Path | Min role | Response |
 | --- | --- | --- | --- |
-| POST | `/api/v1/workspaces/:workspaceId/workflows/:workflowId/runs` | MEMBER | `202 { runId, status: "QUEUED" }`; `409` if workflow has no active version or trigger isn't manual |
+| POST | `/api/v1/workspaces/:workspaceId/workflows/:workflowId/runs` | MEMBER | body `{ input? }` (≤ 64 KB), optional `Idempotency-Key` header → `202 { runId, status }`; same key → same run; `409` if unpublished, archived, or trigger isn't manual |
 
 ## Database Changes
 
@@ -97,3 +97,50 @@ Parts 01, 02, 06.
 ## Implementation Notes
 
 The scaffold already registers a `workflow-runs` queue and a stub processor; this part replaces the stub and moves queue code from `src/infrastructure/queue` to the agreed module.
+
+## Implementation Evidence
+
+Verified 2026-10-01 on branch `feat/part-07-08-queue-and-engine` (from `main` at `4dee5c6`), together with Part 08.
+
+### What was implemented
+
+| Item | Location |
+| --- | --- |
+| Queue config (prefix, attempts, exponential backoff with jitter, retention), queues `workflow-runs` + `maintenance`, job contracts (ids only) | `src/infrastructure/queue/*`, `src/config/env.schema.ts` |
+| `RunQueue.enqueue` with `jobId = runId` | `src/infrastructure/queue/run-queue.service.ts` |
+| API dispatcher: QUEUED run bound to the active version, correlation id, `Idempotency-Key`, DB-then-Redis with sweeper fallback | `src/modules/runs/run-dispatcher.service.ts`, `workflow-runs.controller.ts` |
+| Worker: `ExecutionModule` (worker-only), `WorkflowRunProcessor` (configurable concurrency, `maxStalledCount: 1`), `RunWorkerService` (claim, run, retry/permanent mapping via `UnrecoverableError`) | `src/execution/*`, `src/worker.module.ts` |
+| Error classification: `RetryableError` / `PermanentError` with `ErrorCategory`; transient DB errors retryable; unknown errors INTERNAL and not retried | `src/engine/errors.ts` |
+| Sweeper on a BullMQ job scheduler (`upsertJobScheduler`, one schedule shared by all workers) | `src/execution/processors.ts` |
+| Worker refuses to start if any catalog node type lacks a matching handler | `ExecutionModule.onModuleInit` |
+| Test isolation: unique `QUEUE_PREFIX` per test file, fast backoff, Redis key teardown | `test/setup-*.ts`, `test/global-teardown.ts` |
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint, typecheck, build | pass |
+| `npm test` | 224 passed |
+| `npm run test:e2e` | 16 passed |
+| `npm run test:int` | 158 passed (15 in `execution.int-spec.ts`) |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-07.1 | PASS | Integration: 202 `{ runId, status: QUEUED }`; run row with `triggerSource MANUAL`, input and correlation id; job exists with id = run id and payload `{ runId }`. Live: 202 in 31 ms |
+| AC-07.2 | PASS | Integration: in-process WorkerModule picks up the job (including runs queued before it started). Live: separate `node dist/worker.js` process executed a run created via HTTP on a separate `node dist/main.js` |
+| AC-07.3 | PASS | Run QUEUED → RUNNING → SUCCEEDED with `startedAt`/`completedAt`; mid-run state observed as RUNNING (latch test) |
+| AC-07.4 | PASS | `test.flaky` fails twice (retryable) → three job attempts with backoff → run SUCCEEDED, `attemptCount 3`, step `attemptCount 3` |
+| AC-07.5 | PASS | Permanent failure: job `attemptsMade 1`, state `failed`, run FAILED with category and message. Retryable failure exhausts all 3 attempts → FAILED |
+| AC-07.6 | PASS | `WorkflowRunProcessor` is not resolvable in the API app; a queued run stays QUEUED with no steps while no worker runs |
+| AC-07.7 | PASS | `worker.close()` waits for the active job (still open after 300 ms while the step is held) and returns only after the run SUCCEEDED |
+| AC-07.8 | PASS | A QUEUED run with no job (simulated lost enqueue) is re-enqueued by `RunSweeper.sweep()` and completes |
+
+Also verified: `Idempotency-Key` replay returns the same run with one row; reusing a key for another workflow → 409; malformed key → 400; unpublished / archived / webhook-triggered workflows → 409; manual input > 64 KB → 400. **Live log correlation:** the API's request id for "Run queued" appeared as `correlationId` on the worker's "Run started"/"Run finished" lines with `runId`, `jobId`, `attempt`, `workflowVersionId`; no secrets in either log.
+
+### Notes / limitations
+
+- Provider `Retry-After` values are carried on `RetryableError.retryAfterMs` but not yet used to schedule the retry (plain exponential backoff); Part 13 (Slack rate limits) wires that in.
+- Worker graceful shutdown is proven in-process (`close()` drains the active job). Stopping the worker *container* with SIGTERM is verified in Part 20 together with the Compose worker service.
+- `removeOnComplete`/`removeOnFail` keep 24 h / 7 d of job history in Redis; run history lives in Postgres.

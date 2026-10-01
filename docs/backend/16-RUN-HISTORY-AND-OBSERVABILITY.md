@@ -97,4 +97,4 @@ Parts 07, 08, 15.
 
 ## Implementation Notes
 
-Replaces scaffold `RunsService` and `DashboardService` stubs; routes move under workspace prefix.
+Replaces scaffold `RunsService` and `DashboardService` stubs (routes already under the workspace prefix since Part 04). The engine already honours `cancelRequestedAt` (Part 08); this part adds the endpoint.

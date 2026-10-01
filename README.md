@@ -2,7 +2,7 @@
 
 Backend for **FlowForge** — an integration & workflow automation platform. NestJS 11 · TypeScript · PostgreSQL/Prisma · Redis/BullMQ.
 
-> Status: foundation, data model, authentication, workspace authorization, workflow management and publishing are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
+> Status: foundation, data model, authentication, workspace authorization, workflow management, publishing, the run queue/worker and the execution engine are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
 
 ## Quick start
 
@@ -43,6 +43,7 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/workspaces/:workspaceId/members` (+ `/:userId`) | workspaces |
 | `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/versions/:version`, `/duplicate`, `/archive`, `/unarchive`) | workflows |
 | `/node-types` | workflows |
+| `/workspaces/:workspaceId/workflows/:workflowId/runs` (start a manual run; optional `Idempotency-Key`) | runs |
 | `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |
 | `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
