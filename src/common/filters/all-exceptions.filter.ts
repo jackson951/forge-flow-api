@@ -6,10 +6,34 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
+import { STATUS_CODES } from 'node:http';
+
+export interface ErrorResponseBody {
+  statusCode: number;
+  error: string;
+  message: string | string[];
+  details?: unknown;
+  requestId?: string;
+  path: string;
+  timestamp: string;
+}
+
+interface NormalizedError {
+  status: number;
+  message: string | string[];
+  details?: unknown;
+}
+
+/** Prisma errors that describe a client problem rather than a server fault. */
+const PRISMA_ERROR_MAP: Record<string, NormalizedError> = {
+  P2002: { status: HttpStatus.CONFLICT, message: 'Resource already exists' },
+  P2025: { status: HttpStatus.NOT_FOUND, message: 'Resource not found' },
+};
 
 /**
- * Returns sanitized error bodies to clients. Stack traces and internals
+ * Returns one sanitized error envelope to clients. Stack traces and internals
  * stay in server logs only.
  */
 @Catch()
@@ -21,27 +45,43 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request & { id?: string }>();
 
-    const status =
-      exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
-
-    const body = exception instanceof HttpException ? exception.getResponse() : null;
-    const message =
-      status === HttpStatus.INTERNAL_SERVER_ERROR
-        ? 'Internal server error'
-        : typeof body === 'string'
-          ? body
-          : ((body as { message?: unknown } | null)?.message ?? 'Error');
+    const { status, message, details } = this.normalize(exception);
 
     if (status >= 500) {
-      this.logger.error(exception instanceof Error ? exception.stack : String(exception));
+      this.logger.error(
+        { err: exception, requestId: req.id },
+        exception instanceof Error ? exception.message : 'Unhandled exception',
+      );
     }
 
-    res.status(status).json({
+    const body: ErrorResponseBody = {
       statusCode: status,
+      error: STATUS_CODES[status] ?? 'Error',
       message,
+      ...(details !== undefined && { details }),
       requestId: req.id,
       path: req.url,
       timestamp: new Date().toISOString(),
-    });
+    };
+    res.status(status).json(body);
+  }
+
+  private normalize(exception: unknown): NormalizedError {
+    if (exception instanceof HttpException) {
+      const status = exception.getStatus();
+      if (status >= 500) return { status, message: STATUS_CODES[status] ?? 'Error' };
+
+      const response = exception.getResponse();
+      if (typeof response === 'string') return { status, message: response };
+      const { message, details } = response as { message?: string | string[]; details?: unknown };
+      return { status, message: message ?? exception.message, details };
+    }
+
+    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      const mapped = PRISMA_ERROR_MAP[exception.code];
+      if (mapped) return mapped;
+    }
+
+    return { status: HttpStatus.INTERNAL_SERVER_ERROR, message: 'Internal server error' };
   }
 }
