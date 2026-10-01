@@ -4,9 +4,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { REQUEST_ID_HEADER } from './common/constants';
+import { bodyParserErrorMapper } from './common/http/body-parser-errors';
 import { AppConfigService } from './config/app-config.service';
 
 export const DEFAULT_API_VERSION = '1';
+
+/** Fits the largest allowed workflow definition (256 KB) plus request envelope; Part 18 tunes. */
+export const JSON_BODY_LIMIT = '300kb';
 
 /**
  * HTTP-level setup shared by `main.ts` and the e2e tests, so tests exercise
@@ -17,6 +21,8 @@ export function configureApp(app: NestExpressApplication): void {
   const prefix = config.get('API_PREFIX');
 
   app.disable('x-powered-by');
+  app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
+  app.use(bodyParserErrorMapper);
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({
