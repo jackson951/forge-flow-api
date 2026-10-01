@@ -61,6 +61,26 @@ describe('Foundation (e2e)', () => {
       expect(res.body).toMatchObject({ statusCode: 401, error: 'Unauthorized' });
     });
 
+    it('malformed JSON → generic 400 with request id, body not echoed', async () => {
+      const res = await http
+        .post('/api/v1/auth/login')
+        .set('content-type', 'application/json')
+        .set('x-request-id', 'bad-json-1')
+        .send('{"email": "a@b.co", "password": secret-value');
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({ message: 'Malformed JSON body', requestId: 'bad-json-1' });
+      expect(res.text).not.toContain('secret-value');
+      expect(res.headers['x-request-id']).toBe('bad-json-1');
+    });
+
+    it('oversized JSON body → 413 envelope', async () => {
+      const res = await http
+        .post('/api/v1/auth/login')
+        .send({ email: 'a@b.co', password: 'x'.repeat(400_000) });
+      expect(res.status).toBe(413);
+      expect(res.body).toMatchObject({ statusCode: 413, message: 'Request body is too large' });
+    });
+
     it('unknown routes return the standard 404 envelope', async () => {
       const res = await http.get('/api/v1/does-not-exist').expect(404);
       expect(res.body).toMatchObject({ statusCode: 404, path: '/api/v1/does-not-exist' });

@@ -269,16 +269,17 @@ describe('Workspaces and members (integration)', () => {
     });
   });
 
-  describe('scaffold routes now under the workspace prefix', () => {
-    it('members reach the (not yet implemented) handlers; role rules already apply', async () => {
+  describe('feature routes under the workspace prefix', () => {
+    it('members reach the handlers; role rules apply before them', async () => {
       const owner = await registerUser(server);
       const member = await registerUser(server);
       const ws = await team(owner, [[member, 'MEMBER']]);
       const wf = '00000000-0000-4000-8000-000000000000';
 
-      await api(member.accessToken).get(`/workspaces/${ws}/workflows`).expect(501);
+      await api(member.accessToken).get(`/workspaces/${ws}/workflows`).expect(200);
       await api(member.accessToken).post(`/workspaces/${ws}/workflows/${wf}/publish`).expect(403);
-      await api(owner.accessToken).post(`/workspaces/${ws}/workflows/${wf}/publish`).expect(501);
+      await api(owner.accessToken).post(`/workspaces/${ws}/workflows/${wf}/publish`).expect(404);
+      await api(member.accessToken).get(`/workspaces/${ws}/runs`).expect(501);
       await api(member.accessToken).post(`/workspaces/${ws}/runs/${wf}/retry`).expect(403);
       await api(member.accessToken)
         .post(`/workspaces/${ws}/integrations/GITHUB/connect`)

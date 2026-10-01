@@ -24,6 +24,15 @@ describe('Tenant isolation (integration)', () => {
   let aliceWs: string;
   let bobWs: string;
   let workspaceRoutes: RouteInfo[];
+  let bobWorkflowId: string;
+
+  /**
+   * Resource routes and a resource of Bob's to aim at them. Each later part adds its
+   * resource here (runs, connections, ...); routes are still discovered automatically.
+   */
+  const foreignResources = (): { pattern: RegExp; param: string; id: string }[] => [
+    { pattern: /\/workflows\/:id(\/|$)/, param: 'id', id: bobWorkflowId },
+  ];
 
   const paramValue = (name: string) => (name === 'provider' ? 'GITHUB' : randomUUID());
 
@@ -39,6 +48,7 @@ describe('Tenant isolation (integration)', () => {
       where: { workspaceId },
       orderBy: { userId: 'asc' },
     }),
+    workflows: await prisma.workflow.findMany({ where: { workspaceId }, orderBy: { id: 'asc' } }),
   });
 
   beforeAll(async () => {
@@ -55,6 +65,14 @@ describe('Tenant isolation (integration)', () => {
       .workspaceId;
 
     workspaceRoutes = listRoutes(app).filter((r) => r.path.includes(':workspaceId'));
+
+    bobWorkflowId = (
+      await request(server)
+        .post(`/api/v1/workspaces/${bobWs}/workflows`)
+        .set(bearer(bob.accessToken))
+        .send({ name: "Bob's workflow" })
+        .expect(201)
+    ).body.id;
   });
 
   afterAll(() => app.close());
@@ -104,6 +122,53 @@ describe('Tenant isolation (integration)', () => {
       if (res.status !== 404) failures.push(`${route.method} ${route.path} → ${res.status}`);
     }
     expect(failures).toEqual([]);
+  });
+
+  it("treats another workspace's resource ids exactly like non-existent ones", async () => {
+    // Body validation may legitimately answer before the lookup (e.g. 400 for an empty draft
+    // body). The invariant is: never success, and no difference from a random unknown id.
+    const before = await snapshot(bobWs);
+    const failures: string[] = [];
+    let attacked = 0;
+
+    for (const { pattern, param, id } of foreignResources()) {
+      for (const route of workspaceRoutes.filter((r) => pattern.test(r.path))) {
+        attacked++;
+        const foreign = fillPath(route.path, { workspaceId: aliceWs, [param]: id }, paramValue);
+        const unknown = fillPath(
+          route.path,
+          { workspaceId: aliceWs, [param]: randomUUID() },
+          paramValue,
+        );
+        const a = await send(route, foreign, bearer(alice.accessToken));
+        const b = await send(route, unknown, bearer(alice.accessToken));
+        if (a.status < 400 || a.status !== b.status) {
+          failures.push(`${route.method} ${route.path} → foreign ${a.status}, unknown ${b.status}`);
+        }
+      }
+    }
+
+    expect(attacked).toBeGreaterThanOrEqual(10);
+    expect(failures).toEqual([]);
+    expect(await snapshot(bobWs)).toEqual(before);
+  });
+
+  it("returns 404 for another workspace's workflow even with a valid request body", async () => {
+    const base = `/api/v1/workspaces/${aliceWs}/workflows/${bobWorkflowId}`;
+    const auth = bearer(alice.accessToken);
+    await request(server).get(base).set(auth).expect(404);
+    await request(server).patch(base).set(auth).send({ name: 'hijacked' }).expect(404);
+    await request(server)
+      .put(`${base}/draft`)
+      .set(auth)
+      .send({ expectedRevision: 0, definition: { schemaVersion: 1, nodes: [], edges: [] } })
+      .expect(404);
+    await request(server).post(`${base}/duplicate`).set(auth).expect(404);
+    await request(server).delete(base).set(auth).expect(404);
+
+    const bobs = await prisma.workflow.findUniqueOrThrow({ where: { id: bobWorkflowId } });
+    expect(bobs).toMatchObject({ name: "Bob's workflow", draftRevision: 0, workspaceId: bobWs });
+    expect(await prisma.workflow.count({ where: { workspaceId: aliceWs } })).toBe(0);
   });
 
   it("cannot act on another workspace's member through one's own workspace path", async () => {

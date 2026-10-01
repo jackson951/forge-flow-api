@@ -28,6 +28,7 @@ Rate limiting (auth, general, webhook), body/payload limits, validation review, 
 
 ## Technical Requirements
 
+- Current state (from Parts 01–05): JSON body limit 300 KB, body-parser errors mapped to clean 400/413 envelopes without echoing input. This part settles final limits.
 - `@nestjs/throttler` with Redis storage (`@nest-lab/throttler-storage-redis` or equivalent), custom tracker for IP+email and user ID. Trust proxy configured explicitly (`TRUST_PROXY` hop count) so `req.ip` is correct behind a load balancer.
 - Helmet with API-appropriate CSP (`default-src 'none'`) except Swagger route; `Cross-Origin-Resource-Policy: same-site`.
 - CORS: explicit origins, `credentials: true`, methods/headers allow-list, no wildcard with credentials.
