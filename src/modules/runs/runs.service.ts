@@ -1,16 +1,9 @@
-import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, NotImplementedException } from '@nestjs/common';
-import { Queue } from 'bullmq';
-import { ExecuteRunJobData, QUEUES } from '../../infrastructure/queue/queue.constants';
 import { ListRunsQueryDto } from './dto/list-runs-query.dto';
 
+/** Run history, retry and cancel arrive in Part 16. */
 @Injectable()
 export class RunsService {
-  constructor(
-    @InjectQueue(QUEUES.WORKFLOW_RUNS)
-    private readonly runsQueue: Queue<ExecuteRunJobData>,
-  ) {}
-
   list(_workspaceId: string, _query: ListRunsQueryDto): Promise<unknown> {
     throw new NotImplementedException();
   }

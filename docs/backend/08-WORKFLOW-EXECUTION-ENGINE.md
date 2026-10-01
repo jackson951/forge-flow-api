@@ -1,6 +1,6 @@
 # 08 — Workflow Execution Engine
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-01) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -36,6 +36,8 @@ WorkflowRun: QUEUED → RUNNING → SUCCEEDED | FAILED | CANCELLED
 StepRun:     PENDING → RUNNING → SUCCEEDED | FAILED | RETRYING
              RETRYING → RUNNING
              PENDING → SKIPPED
+             PENDING → FAILED (fails before starting: missing handler, unresolvable config)
+             RUNNING → RUNNING (idempotent step re-executed after a crash)
 ```
 
 Transitions are implemented in one pure function (`transition(state, event)`) that rejects illegal moves; persistence uses conditional updates on the current status.
@@ -127,3 +129,45 @@ Parts 06, 07. Part 11 extends value resolution (the engine ships with a minimal 
 ## Implementation Notes
 
 Replaces scaffold stubs `WorkflowExecutorService`, `NodeRegistryService`, `NodeHandler` contract.
+
+## Implementation Evidence
+
+Verified 2026-10-01 on branch `feat/part-07-08-queue-and-engine`.
+
+### What was implemented
+
+| Item | Location |
+| --- | --- |
+| `ExecutionEngine`: DFS order from the trigger, steps planned PENDING up front, branch selection, output passing, resume, uncertain-outcome rule, timeouts, output size limit, cancellation, classified failures | `src/engine/execution/execution-engine.ts` |
+| Explicit run/step state machines; conditional (race-safe) updates built from them | `transitions.ts`, `src/execution/prisma-run-store.ts` |
+| Handler contract with `sideEffect`, registry with catalog consistency check | `node-handler.ts`, `handler-registry.ts` |
+| `RunStore` port; Prisma implementation; in-memory implementation for unit tests (same transition rules) | `run-store.ts`, `src/execution/prisma-run-store.ts`, `testing/in-memory-run-store.ts` |
+| Built-in handlers `manual.trigger`, `util.log`; `condition` placeholder (see limitations) | `built-in-handlers.ts` |
+| Storage sanitisation of step input/output (credential-like keys redacted, plain JSON) | `sanitize.ts` |
+| `ValueResolver` port (identity until Part 11) | `execution-engine.ts` |
+| Architecture test: pure engine folders import no Nest, Prisma service, HTTP, queue or provider SDK | `src/engine/architecture.spec.ts` |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-08.1 | PASS | Unit: linear and fan-out order; integration and live: two-step workflow SUCCEEDED with sequences 1..n |
+| AC-08.2 | PASS | Unit: true/false branch each run only their subtree, others SKIPPED; condition without a matching edge ends the path. Integration with a real worker: same |
+| AC-08.3 | PASS | Unit + integration: failed step FAILED, everything after it SKIPPED, run FAILED with category |
+| AC-08.4 | PASS | Integration: while a step is held, DB shows run RUNNING and steps SUCCEEDED / RUNNING / PENDING; afterwards all SUCCEEDED with timings |
+| AC-08.5 | PASS | Unit + integration: later steps receive `outputs` of earlier steps and `triggerInput` |
+| AC-08.6 | PASS | Unit: retry resumes at the failed step without re-running succeeded ones; idempotent step left RUNNING is re-executed; non-idempotent step left RUNNING fails with UNCERTAIN_OUTCOME without calling the handler. Integration: a non-idempotent step before a flaky one ran exactly once across three job attempts |
+| AC-08.7 | PASS | Restart/failure behaviour documented in this spec and in the engine's header comment |
+| AC-08.8 | PASS | Architecture test over 14 engine source files |
+
+Also covered by unit tests: unknown errors become INTERNAL with a generic stored message (no leakage); timeouts are retryable PROVIDER_TIMEOUT for idempotent steps but UNCERTAIN_OUTCOME (never retried) for non-idempotent ones; outputs over the limit fail with VALIDATION; non-boolean condition results fail; missing handler and resolver errors fail the step before it starts; illegal transitions are rejected; stored outputs redact credential-like keys; cancellation stops before the next step.
+
+### Found and fixed during this part
+
+- **Steps failing before they start were left PENDING.** A missing handler or unresolvable config tried PENDING → FAILED, which the first transition table did not allow; the store rejected it, and because the failure write and the "skip the rest" write shared one `try`, downstream steps were not skipped either. PENDING → FAILED is now a legal transition, and the two writes are independent. Found by the engine unit tests.
+
+### Limitations
+
+- **The built-in `condition` node fails at runtime** with VALIDATION "Condition evaluation is not available yet (Part 11)". Branching itself is implemented and tested through test-only condition handlers; the safe evaluator and reference resolver are Part 11.
+- On resume, earlier steps' outputs are the *stored* (sanitised) versions, so a credential-like key in an output arrives as `[REDACTED]` to later steps after a retry. Handlers must not pass secrets through outputs (Part 17).
+- Step log lines carry `runId` and `nodeKey`; adding `correlationId` and `stepRunId` to every step line is Part 16.
