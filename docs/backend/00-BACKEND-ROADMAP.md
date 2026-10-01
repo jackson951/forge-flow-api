@@ -8,9 +8,9 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 
 | # | Part | Status | Notes (last reviewed 2026-09-30) |
 | --- | --- | --- | --- |
-| 01 | [Foundation and Infrastructure](01-FOUNDATION-AND-INFRASTRUCTURE.md) | COMPLETE | All 14 acceptance criteria verified 2026-09-30 (34 unit + 14 e2e tests, live server + production container checks). Updated CI workflow not yet run on GitHub |
-| 02 | [Database Domain Model](02-DATABASE-DOMAIN-MODEL.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01 (56 integration tests; migrations proven on an empty Postgres). Migration evolves `init` rather than replacing it |
-| 03 | [Authentication](03-AUTHENTICATION.md) | NOT STARTED | Controller/DTO stubs; service throws 501; guard rejects all non-public routes |
+| 01 | [Foundation and Infrastructure](01-FOUNDATION-AND-INFRASTRUCTURE.md) | COMPLETE | All 14 acceptance criteria verified 2026-09-30; CI green on GitHub (PR #1, `main`). Readiness startup race fixed in Part 03 |
+| 02 | [Database Domain Model](02-DATABASE-DOMAIN-MODEL.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green incl. integration tests (PR #2, `main`) |
+| 03 | [Authentication](03-AUTHENTICATION.md) | COMPLETE | All 10 acceptance criteria verified 2026-10-01 (27 auth + 3 throttle integration tests, live smoke test). Not yet pushed/CI-verified |
 | 04 | [Workspaces and Authorization](04-WORKSPACES-AND-AUTHORIZATION.md) | NOT STARTED | Stubs only; `WorkspaceAccessGuard` always denies |
 | 05 | [Workflow Management](05-WORKFLOW-MANAGEMENT.md) | NOT STARTED | Controller routes + stubs; validator throws 501 |
 | 06 | [Workflow Versioning and Publishing](06-WORKFLOW-VERSIONING-AND-PUBLISHING.md) | NOT STARTED | Stub endpoints only |
@@ -27,7 +27,7 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 17 | [Integration Credential Security](17-INTEGRATION-CREDENTIAL-SECURITY.md) | NOT STARTED | Encryption stub; log redaction path list exists |
 | 18 | [Rate Limiting and API Hardening](18-RATE-LIMITING-AND-API-HARDENING.md) | NOT STARTED | In-memory throttler with per-route limits on auth/webhooks |
 | 19 | [Testing and Quality Gate](19-TESTING-AND-QUALITY-GATE.md) | IN PROGRESS | Unit, e2e and integration configs exist (`test:int` with isolated `*_test` DB, factories, truncation). E2E journey, coverage thresholds not started |
-| 20 | [CI/CD and Containerization](20-CI-CD-AND-CONTAINERIZATION.md) | IN PROGRESS | Dockerfile, Compose (`full` profile; dev defaults + localhost ports added in Part 01), CI now has Postgres/Redis services + migrate step (unverified on GitHub). Missing: migrate service in Compose, audit, image build in CI, secret scan |
+| 20 | [CI/CD and Containerization](20-CI-CD-AND-CONTAINERIZATION.md) | IN PROGRESS | Dockerfile, Compose (dev defaults, localhost ports), CI with Postgres/Redis services running format, lint, typecheck, unit, migrate, e2e, integration, build — green on GitHub. Missing: migrate service in Compose, audit, image build in CI, secret scan |
 | 21 | [Performance and Scalability](21-PERFORMANCE-AND-SCALABILITY.md) | NOT STARTED | — |
 | 22 | [Backend Release Readiness](22-BACKEND-RELEASE-READINESS.md) | NOT STARTED | — |
 
@@ -236,3 +236,4 @@ flowchart TD
 | 2026-09-30 | Roadmap and specifications 01–22 created; statuses set from repository inspection of commit `88b2fb5`. |
 | 2026-09-30 | Part 01 implemented and verified → COMPLETE. Parts 19 and 20 advanced (test harness, CI services). Next: Part 02. |
 | 2026-10-01 | Part 02 implemented and verified → COMPLETE. Integration test harness added (Part 19). Next: Part 03. |
+| 2026-10-01 | CI confirmed green on GitHub for Parts 01–02. Part 03 implemented and verified → COMPLETE. Next: Part 04. |

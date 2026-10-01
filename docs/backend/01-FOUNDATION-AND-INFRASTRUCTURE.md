@@ -206,5 +206,5 @@ Verified 2026-09-30 on Windows 11, Node 24.13, Docker 29.8 (Postgres 17 on host 
 ### Known limitations / follow-ups (not blocking)
 
 - The local `flowforge-postgres` container on this machine was created outside Compose (`docker run`, volume `flowforge_postgres_data`), so `docker compose up postgres` conflicts on the container name. The Compose service itself is verified (see AC-01.4). To switch, remove the old container (data is in its volume) and run `docker compose up -d postgres`, or keep using it.
-- The new e2e suite needs Postgres/Redis, so `.github/workflows/ci.yml` now starts both as service containers with throwaway env values and runs `prisma validate` and `migrate deploy` before e2e. **This workflow has not been run on GitHub yet** (nothing has been pushed), so it stays unverified until the first push. The rest of CI hardening is Part 20.
+- The new e2e suite needs Postgres/Redis, so `.github/workflows/ci.yml` now starts both as service containers with throwaway env values and runs `prisma validate` and `migrate deploy` before e2e. Confirmed green on GitHub Actions for PR #1 and `main` (2026-10-01). The rest of CI hardening is Part 20.
 - The throttler still uses in-memory storage (Part 18).

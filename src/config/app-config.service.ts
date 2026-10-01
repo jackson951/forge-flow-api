@@ -19,6 +19,10 @@ export class AppConfigService {
     return this.get('SWAGGER_ENABLED') ?? !this.isProduction;
   }
 
+  get throttleEnabled(): boolean {
+    return this.get('THROTTLE_ENABLED') ?? true;
+  }
+
   get corsOrigins(): string[] {
     return this.get('CORS_ORIGINS')
       .split(',')

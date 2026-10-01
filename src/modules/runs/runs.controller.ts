@@ -9,8 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser } from '../../common/decorators';
-import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { pendingWorkspaceScope } from '../../common/utils/pending-workspace-scope';
 import { ListRunsQueryDto } from './dto/list-runs-query.dto';
 import { RunsService } from './runs.service';
 
@@ -21,24 +20,24 @@ export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListRunsQueryDto) {
-    return this.runs.list(user.workspaceId, query);
+  list(@Query() query: ListRunsQueryDto) {
+    return this.runs.list(pendingWorkspaceScope(), query);
   }
 
   @Get(':id')
-  get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.get(user.workspaceId, id);
+  get(@Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.get(pendingWorkspaceScope(), id);
   }
 
   @HttpCode(HttpStatus.ACCEPTED)
   @Post(':id/retry')
-  retry(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.retry(user.workspaceId, id);
+  retry(@Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.retry(pendingWorkspaceScope(), id);
   }
 
   @HttpCode(HttpStatus.OK)
   @Post(':id/cancel')
-  cancel(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.cancel(user.workspaceId, id);
+  cancel(@Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.cancel(pendingWorkspaceScope(), id);
   }
 }

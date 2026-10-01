@@ -13,9 +13,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser } from '../../common/decorators';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { pendingWorkspaceScope } from '../../common/utils/pending-workspace-scope';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
@@ -28,68 +27,60 @@ export class WorkflowsController {
   constructor(private readonly workflows: WorkflowsService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Query() query: PaginationQueryDto) {
-    return this.workflows.list(user.workspaceId, query);
+  list(@Query() query: PaginationQueryDto) {
+    return this.workflows.list(pendingWorkspaceScope(), query);
   }
 
   @Get(':id')
-  get(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.get(user.workspaceId, id);
+  get(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.get(pendingWorkspaceScope(), id);
   }
 
   @Post()
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateWorkflowDto) {
-    return this.workflows.create(user.workspaceId, dto);
+  create(@Body() dto: CreateWorkflowDto) {
+    return this.workflows.create(pendingWorkspaceScope(), dto);
   }
 
   @Patch(':id')
-  update(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateWorkflowDto,
-  ) {
-    return this.workflows.update(user.workspaceId, id, dto);
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateWorkflowDto) {
+    return this.workflows.update(pendingWorkspaceScope(), id, dto);
   }
 
   @Put(':id/draft')
-  saveDraft(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: SaveDraftDto,
-  ) {
-    return this.workflows.saveDraft(user.workspaceId, id, dto);
+  saveDraft(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SaveDraftDto) {
+    return this.workflows.saveDraft(pendingWorkspaceScope(), id, dto);
   }
 
   @HttpCode(HttpStatus.OK)
   @Post(':id/validate')
-  validate(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.validate(user.workspaceId, id);
+  validate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.validate(pendingWorkspaceScope(), id);
   }
 
   @Post(':id/publish')
-  publish(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.publish(user.workspaceId, id);
+  publish(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.publish(pendingWorkspaceScope(), id);
   }
 
   @Get(':id/versions')
-  versions(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.listVersions(user.workspaceId, id);
+  versions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.listVersions(pendingWorkspaceScope(), id);
   }
 
   @Post(':id/duplicate')
-  duplicate(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.duplicate(user.workspaceId, id);
+  duplicate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.duplicate(pendingWorkspaceScope(), id);
   }
 
   @HttpCode(HttpStatus.OK)
   @Post(':id/archive')
-  archive(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.archive(user.workspaceId, id);
+  archive(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.archive(pendingWorkspaceScope(), id);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id')
-  remove(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.remove(user.workspaceId, id);
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.remove(pendingWorkspaceScope(), id);
   }
 }
