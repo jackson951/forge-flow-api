@@ -3,8 +3,16 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".int-spec.ts$",
-  "transform": { "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "<rootDir>/../tsconfig.spec.json" }] },
+  "transform": {
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "tsconfig": "<rootDir>/../tsconfig.spec.json"
+      }
+    ]
+  },
   "globalSetup": "<rootDir>/integration/global-setup.ts",
   "setupFiles": ["<rootDir>/setup-int-env.ts"],
-  "testTimeout": 30000
+  "testTimeout": 30000,
+  "globalTeardown": "<rootDir>/global-teardown.ts"
 }

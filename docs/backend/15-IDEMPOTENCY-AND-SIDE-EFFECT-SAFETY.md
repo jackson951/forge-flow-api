@@ -108,11 +108,14 @@ Parts 07–14.
 
 ## Implementation Notes
 
+Already in place after Parts 07–08 (to be re-verified here): `jobId = runId`; claim via conditional update; succeeded steps never re-executed; RUNNING non-idempotent step → UNCERTAIN_OUTCOME; non-idempotent timeouts → UNCERTAIN_OUTCOME; sweeper for lost enqueues; manual-run `Idempotency-Key`.
+
+
 Handler classification table (fill in as handlers ship):
 
 | Handler | sideEffect | Provider idempotency key |
 | --- | --- | --- |
-| manual.trigger, condition, util.log | none | n/a |
+| manual.trigger, condition, util.log | none | n/a (implemented in Part 08) |
 | ai.* | idempotent | n/a |
 | slack.sendMessage | non-idempotent | none available |
 | microsoft.todo.createTask | non-idempotent | none available |

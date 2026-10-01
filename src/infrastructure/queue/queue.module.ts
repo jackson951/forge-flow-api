@@ -2,24 +2,26 @@ import { BullModule } from '@nestjs/bullmq';
 import { Global, Module } from '@nestjs/common';
 import { AppConfigService } from '../../config/app-config.service';
 import { QUEUES } from './queue.constants';
+import { RunQueue } from './run-queue.service';
 
+/**
+ * BullMQ connection and queues, shared by API and worker. Processors are registered only in
+ * the worker (ExecutionModule); importing this module never consumes jobs.
+ */
 @Global()
 @Module({
   imports: [
     BullModule.forRootAsync({
       inject: [AppConfigService],
+      // BullMQ opens its own connections (workers need maxRetriesPerRequest: null).
       useFactory: (config: AppConfigService) => ({
         connection: config.redis,
-        defaultJobOptions: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5_000 },
-          removeOnComplete: { count: 1_000 },
-          removeOnFail: { count: 5_000 },
-        },
+        prefix: config.queue.prefix,
       }),
     }),
-    BullModule.registerQueue({ name: QUEUES.WORKFLOW_RUNS }),
+    BullModule.registerQueue({ name: QUEUES.WORKFLOW_RUNS }, { name: QUEUES.MAINTENANCE }),
   ],
-  exports: [BullModule],
+  providers: [RunQueue],
+  exports: [BullModule, RunQueue],
 })
 export class QueueModule {}
