@@ -1,6 +1,6 @@
 # 05 — Workflow Management
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-01) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -67,6 +67,7 @@ The trigger is a node of kind `TRIGGER` (replacing the scaffold's separate `trig
 | `CYCLE` | Cycles unsupported |
 | `UNREACHABLE_NODE` | Node not reachable from the trigger (also covers disconnected nodes) |
 | `CONDITION_WITHOUT_BRANCH` | Condition with no outgoing edge (warning, not error) |
+| `SECRET_IN_CONFIG` | Config key that looks like a credential (`apiKey`, `token`, `client_secret`, `password`, …; exact-name match so `maxTokens` is allowed) |
 | `LIMIT_EXCEEDED` | Node count > 50, edges > 100, serialized definition > 256 KB, config > 16 KB per node |
 
 Issues: `{ code, severity: "error" | "warning", nodeKey?, edge?, path?, message }`.
@@ -94,6 +95,7 @@ Base: `/api/v1/workspaces/:workspaceId/workflows`
 | POST | `/:workflowId/duplicate` | MEMBER | `201` |
 | POST | `/:workflowId/archive` | ADMIN | |
 | POST | `/:workflowId/unarchive` | ADMIN | |
+| GET | `/api/v1/node-types` (not workspace-scoped) | authenticated | built-in node catalogue |
 | DELETE | `/:workflowId` | ADMIN | `204` or `409` if runs exist |
 
 ## Database Changes
@@ -148,3 +150,53 @@ Parts 02, 04.
 ## Implementation Notes
 
 The scaffold's `WorkflowDefinition` contract (separate `trigger` object, edges from `'trigger'`) is replaced by the schema above.
+
+## Implementation Evidence
+
+Verified 2026-10-01 on branch `feat/part-05-workflow-management` (from `main` at `7fbedb9`).
+
+### What was implemented
+
+| Item | Location |
+| --- | --- |
+| Definition schema (zod), structural parse with field-level errors, limits | `src/engine/definition/definition.schema.ts` |
+| Pure graph validator, all rule codes in the table above | `src/engine/validation/graph-validator.ts` |
+| Node-type catalogue with built-ins `manual.trigger`, `condition` (structure only; Part 11 adds reference rules), `util.log` | `src/engine/catalog/node-type-catalog.ts` |
+| Workflow CRUD, draft save with optimistic concurrency, validate, duplicate, archive/unarchive (archive removes trigger routing rows), delete-only-without-runs | `src/modules/workflows/workflows.service.ts`, `workflows.controller.ts` |
+| Keyset pagination (createdAt desc, id desc) with opaque cursor | `src/common/utils/cursor.ts` |
+| `GET /api/v1/node-types` | `src/modules/workflows/node-types.controller.ts` |
+| Publish / versions: still 501 (Part 06), but now scoped (404 for foreign ids first) | service |
+| JSON body limit 300 KB (fits a 256 KB definition) | `src/app.setup.ts` |
+| Body-parser errors mapped to clean 400/413 envelopes (bug found here, see below) | `src/common/http/body-parser-errors.ts`, `all-exceptions.filter.ts` |
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint, typecheck, build | pass |
+| `npm test` | 153 passed (45 for parser/validator) |
+| `npm run test:e2e` | 16 passed |
+| `npm run test:int` | 132 passed |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-05.1 | PASS | Integration: valid branching workflow saves → `{ draftRevision: 1, issues: [] }`, round-trips unchanged |
+| AC-05.2 | PASS | Integration: malformed shape → 400 with field paths, revision unchanged; >50 nodes → 400 `LIMIT_EXCEEDED`; >300 KB body → 413 |
+| AC-05.3 | PASS | Unit: at least one case per rule code, incl. joins, cycles, unreachable/disconnected nodes, secrets, limits; determinism; parser field paths |
+| AC-05.4 | PASS | Integration: stale revision → 409 with `currentRevision`; two concurrent saves → exactly one 200 and one 409 |
+| AC-05.5 | PASS | Integration: MEMBER archive/unarchive/delete → 403; unauthenticated → 401 (isolation suite) |
+| AC-05.6 | PASS | Isolation suite: non-member → 404 on all workflow routes; Alice using Bob's workflow id under her own workspace → same response as an unknown id, never 2xx, Bob's data unchanged; explicit valid-body attack (get/patch/draft/duplicate/delete) → 404. **Mutation check:** removing `workspaceId` from the workflow lookup makes both resource tests fail |
+| AC-05.7 | PASS | Integration: delete without runs → 204; with a run → 409 "archive it instead" (FK race also mapped to 409) |
+| AC-05.8 | PASS | Integration: duplicate is an independent DRAFT ("Copy of …"); editing it leaves the original untouched |
+
+### Found and fixed during this part
+
+- **Oversized request bodies returned 500 (Part 01 code).** The body parser's "payload too large" error is not a Nest exception, so the filter treated it as unknown. Malformed JSON returned 400 but echoed part of the request body and had no `requestId` (the parser runs before the request-id middleware). An Express error mapper now turns parser errors into generic 400/413 responses, and the filter generates a request id when none exists yet. Unit and e2e tested.
+- **Tenant test invariant corrected.** For routes that validate the body before the lookup (draft save), a foreign id gets the same 400 as any unknown id. The suite now asserts "identical to an unknown id and never 2xx", plus an explicit valid-body attack that must return 404.
+
+### Notes
+
+- Workflow listing orders by `createdAt` (stable under edits). It is served by the existing `(workspaceId, status, updatedAt)` index plus a filter; a dedicated `(workspaceId, createdAt)` index is left to Part 21 if measurements show the need.
+- The JSON body limit (300 KB) is provisional; Part 18 owns final request limits.

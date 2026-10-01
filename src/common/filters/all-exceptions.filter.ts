@@ -9,6 +9,8 @@ import {
 import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
 import { STATUS_CODES } from 'node:http';
+import { REQUEST_ID_HEADER } from '../constants';
+import { resolveRequestId } from '../utils/request-id';
 
 export interface ErrorResponseBody {
   statusCode: number;
@@ -45,11 +47,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request & { id?: string }>();
 
+    // Errors raised before the logging middleware (e.g. body parsing) have no req.id yet.
+    const requestId = req.id ?? resolveRequestId(req.headers[REQUEST_ID_HEADER]);
+    if (!res.headersSent && !res.getHeader(REQUEST_ID_HEADER)) {
+      res.setHeader(REQUEST_ID_HEADER, requestId);
+    }
+
     const { status, message, details } = this.normalize(exception);
 
     if (status >= 500) {
       this.logger.error(
-        { err: exception, requestId: req.id },
+        { err: exception, requestId },
         exception instanceof Error ? exception.message : 'Unhandled exception',
       );
     }
@@ -59,7 +67,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error: STATUS_CODES[status] ?? 'Error',
       message,
       ...(details !== undefined && { details }),
-      requestId: req.id,
+      requestId,
       path: req.url,
       timestamp: new Date().toISOString(),
     };
@@ -80,6 +88,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       const mapped = PRISMA_ERROR_MAP[exception.code];
       if (mapped) return mapped;
+    }
+
+    // Client errors from Express middleware (http-errors objects marked safe to expose).
+    const { status, expose } = (exception ?? {}) as { status?: unknown; expose?: unknown };
+    if (typeof status === 'number' && status >= 400 && status < 500 && expose === true) {
+      return { status, message: STATUS_CODES[status] ?? 'Error' };
     }
 
     return { status: HttpStatus.INTERNAL_SERVER_ERROR, message: 'Internal server error' };
