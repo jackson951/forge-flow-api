@@ -12,8 +12,8 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 02 | [Database Domain Model](02-DATABASE-DOMAIN-MODEL.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green incl. integration tests (PR #2, `main`) |
 | 03 | [Authentication](03-AUTHENTICATION.md) | COMPLETE | All 10 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #3, `main`) |
 | 04 | [Workspaces and Authorization](04-WORKSPACES-AND-AUTHORIZATION.md) | COMPLETE | All 7 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #4, `main`) |
-| 05 | [Workflow Management](05-WORKFLOW-MANAGEMENT.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; pure graph validator (45 unit tests); resource-level tenant isolation (mutation-checked). Not yet pushed/CI-verified |
-| 06 | [Workflow Versioning and Publishing](06-WORKFLOW-VERSIONING-AND-PUBLISHING.md) | NOT STARTED | Stub endpoints only |
+| 05 | [Workflow Management](05-WORKFLOW-MANAGEMENT.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #5, `main`) |
+| 06 | [Workflow Versioning and Publishing](06-WORKFLOW-VERSIONING-AND-PUBLISHING.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-01; locked transactional publish, canonical hashing, routing table maintained. Not yet pushed/CI-verified |
 | 07 | [Queue and Worker Infrastructure](07-QUEUE-AND-WORKER-INFRASTRUCTURE.md) | NOT STARTED | BullMQ queue registered and worker entrypoint exists; no job contracts, retries classification or tests |
 | 08 | [Workflow Execution Engine](08-WORKFLOW-EXECUTION-ENGINE.md) | NOT STARTED | Contracts/registry skeleton; executor throws 501 |
 | 09 | [Webhook Platform](09-WEBHOOK-PLATFORM.md) | NOT STARTED | Controller with raw body; service throws 501 |
@@ -239,3 +239,4 @@ flowchart TD
 | 2026-10-01 | CI confirmed green on GitHub for Parts 01–02. Part 03 implemented and verified → COMPLETE. Next: Part 04. |
 | 2026-10-01 | Part 03 CI green on GitHub. Part 04 implemented and verified → COMPLETE; scaffold routes moved under `/workspaces/:workspaceId`. Next: Part 05. |
 | 2026-10-01 | Part 04 CI green on GitHub. Part 05 implemented and verified → COMPLETE; fixed body-parser errors returning 500 (Part 01 code). Next: Part 06. |
+| 2026-10-01 | Part 05 CI green on GitHub. Part 06 implemented and verified → COMPLETE. Next: Part 07. |

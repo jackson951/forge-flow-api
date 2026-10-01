@@ -369,12 +369,13 @@ describe('Workflow management (integration)', () => {
       await api(owner).get(used.id).expect(200);
     });
 
-    it('publishing and version history are not implemented yet, but still scoped', async () => {
+    it('publish requires the reviewed revision (details in publishing.int-spec.ts)', async () => {
       const wf = await createWorkflow();
       await request(server)
         .post(`/api/v1/workspaces/${ws}/workflows/${wf.id}/publish`)
         .set(bearer(owner.accessToken))
-        .expect(501);
+        .send({})
+        .expect(400);
     });
   });
 

@@ -2,7 +2,7 @@
 
 Backend for **FlowForge** — an integration & workflow automation platform. NestJS 11 · TypeScript · PostgreSQL/Prisma · Redis/BullMQ.
 
-> Status: foundation, data model, authentication and workspace authorization are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
+> Status: foundation, data model, authentication, workspace authorization, workflow management and publishing are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
 
 ## Quick start
 
@@ -41,7 +41,8 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/auth/*` (register, login, refresh, logout, logout-all, me) | auth |
 | `/workspaces`, `/workspaces/:workspaceId` | workspaces |
 | `/workspaces/:workspaceId/members` (+ `/:userId`) | workspaces |
-| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/duplicate`, `/archive`) | workflows |
+| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/versions/:version`, `/duplicate`, `/archive`, `/unarchive`) | workflows |
+| `/node-types` | workflows |
 | `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |
 | `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |

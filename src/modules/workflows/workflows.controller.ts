@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -18,14 +19,18 @@ import {
   ApiConflictResponse,
   ApiNotFoundResponse,
   ApiTags,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CurrentWorkspace, RequireRole } from '../../common/decorators';
 import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
+import { ListVersionsQueryDto } from './dto/list-versions-query.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
+import { PublishWorkflowDto } from './dto/publish-workflow.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { ValidateDefinitionDto } from './dto/validate-definition.dto';
+import { PublishingService } from './publishing.service';
 import { WorkflowsService } from './workflows.service';
 
 /** Roles follow the Part 04 matrix: members author, ADMIN+ change what runs. */
@@ -34,7 +39,10 @@ import { WorkflowsService } from './workflows.service';
 @ApiNotFoundResponse({ description: 'Workspace or workflow not found (or not a member)' })
 @Controller('workspaces/:workspaceId/workflows')
 export class WorkflowsController {
-  constructor(private readonly workflows: WorkflowsService) {}
+  constructor(
+    private readonly workflows: WorkflowsService,
+    private readonly publishing: PublishingService,
+  ) {}
 
   @Get()
   list(@CurrentWorkspace() ws: WorkspaceAccess, @Query() query: ListWorkflowsQueryDto) {
@@ -81,15 +89,36 @@ export class WorkflowsController {
     return this.workflows.validate(ws.workspaceId, id, dto.definition);
   }
 
+  /** Freezes the reviewed draft as the next immutable version and activates it. */
   @RequireRole('ADMIN')
+  @ApiUnprocessableEntityResponse({ description: 'The draft has validation errors' })
+  @ApiConflictResponse({ description: 'Stale revision, archived, or nothing changed' })
   @Post(':id/publish')
-  publish(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.publish(ws.workspaceId, id);
+  publish(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PublishWorkflowDto,
+  ) {
+    return this.publishing.publish(ws.workspaceId, ws.userId, id, dto.expectedRevision);
   }
 
   @Get(':id/versions')
-  versions(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
-    return this.workflows.listVersions(ws.workspaceId, id);
+  versions(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListVersionsQueryDto,
+  ) {
+    return this.publishing.listVersions(ws.workspaceId, id, query.limit, query.cursor);
+  }
+
+  /** Versions are read-only: there is deliberately no update or delete route. */
+  @Get(':id/versions/:version')
+  version(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('version', ParseIntPipe) version: number,
+  ) {
+    return this.publishing.getVersion(ws.workspaceId, id, version);
   }
 
   @Post(':id/duplicate')
