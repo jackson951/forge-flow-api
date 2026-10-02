@@ -28,9 +28,28 @@ Full stack in containers: `docker compose --profile full up --build`
 | `npm run build` | Compile to `dist/` (API → `dist/main.js`, worker → `dist/worker.js`) |
 | `npm run start:dev` / `worker:dev` | Watch mode |
 | `npm run lint` / `typecheck` | ESLint / `tsc --noEmit` |
-| `npm test` / `test:cov` | Unit tests (no external services) |
-| `npm run test:e2e` | E2E tests — needs `docker compose up -d postgres redis` and `.env` |
+| `npm test` / `test:cov` | Unit tests (no external services); `test:cov` enforces per-area coverage |
+| `npm run test:int` / `test:e2e` | Integration / E2E tests (need Postgres + Redis) |
+| `npm run test:all` | Every suite once, merged coverage, global coverage floor (what CI runs) |
 | `npm run prisma:migrate` / `prisma:studio` | Database |
+
+## Testing
+
+| Suite | Location | Needs | Command |
+| --- | --- | --- | --- |
+| Unit | `src/**/*.spec.ts` | nothing (outbound HTTP is blocked) | `npm test` |
+| Integration | `test/integration/*.int-spec.ts` | Postgres + Redis | `npm run test:int` |
+| E2E | `test/e2e/*.e2e-spec.ts` | Postgres + Redis | `npm run test:e2e` |
+
+1. `docker compose up -d postgres redis` (or point `DATABASE_URL` / `REDIS_HOST` at running servers). Without them the integration/E2E run stops with an explanation — tests never skip silently.
+2. Integration and E2E tests use a separate database, `<your database>_test`, migrated automatically (`prisma migrate deploy`) and emptied by each test file; your development data is never touched. Each test file uses its own Redis key prefix (`ff-test-*`), removed afterwards.
+3. Provider APIs (GitHub, Slack, Microsoft, the AI model) are never called: tests use in-process fakes (`test/support/fake-*.ts`), the fake AI provider, and any `fetch` to a non-local host fails.
+
+**Writing tests:** factories in `test/support/factories.ts`, `registerUser`/`bearer` in `auth.ts`, `createTestApp` / `createTestWorker` (real API and worker, in-process), `waitFor` instead of sleeps, `captureLogs` + `expectNoSecrets` (`canaries.ts`) to prove secrets never reach logs or responses, test node types (`test.wait`, `test.fail`, `test.sideEffect`, …) in `test-node-types.ts`.
+
+**Coverage:** unit thresholds — engine, expressions, validation and crypto ≥ 90 % lines (`jest.config.json`); whole-system floor ≥ 70 % lines/statements over all suites together (`test/jest-all.json`). Reports in `coverage/`.
+
+**CI quality gate** (`.github/workflows/ci.yml`, all must pass): install → Prisma validate + migrate on a fresh database → format, lint, typecheck → unit tests + thresholds → all suites + coverage floor → build → `npm audit --audit-level=high`.
 
 ## API surface (scope §12)
 

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import { ThrottlerStorageRecord } from '@nestjs/throttler/dist/throttler-storage-record.interface';
 import Redis from 'ioredis';
@@ -27,10 +27,16 @@ return {hits, windowLeft, 0, 0}
  * Rate-limit counters in Redis, so limits hold across all API instances (Part 18, FR-18.1).
  * Same contract as the throttler's in-memory storage: ttl/blockDuration in ms in, times in
  * seconds out. Keys live under the deployment's prefix and expire on their own.
+ *
+ * Fails open: if Redis is unavailable (starting, restarting, outage) requests are allowed and
+ * a warning is logged, so a Redis problem never turns into API-wide 500s — webhooks in
+ * particular must keep being accepted (Part 15, S7). Limits resume when Redis is back.
  */
 @Injectable()
 export class RedisThrottlerStorage implements ThrottlerStorage {
   private readonly prefix: string;
+  private readonly logger = new Logger(RedisThrottlerStorage.name);
+  private lastWarning = 0;
 
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -47,20 +53,39 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
     throttlerName: string,
   ): Promise<ThrottlerStorageRecord> {
     const base = `${this.prefix}:${throttlerName}:${key}`;
-    const [hits, windowLeft, blocked, blockLeft] = (await this.redis.eval(
-      INCREMENT_SCRIPT,
-      2,
-      `${base}:hits`,
-      `${base}:block`,
-      String(ttl),
-      String(limit),
-      String(blockDuration || ttl),
-    )) as [number, number, number, number];
+    let result: [number, number, number, number];
+    try {
+      result = (await this.redis.eval(
+        INCREMENT_SCRIPT,
+        2,
+        `${base}:hits`,
+        `${base}:block`,
+        String(ttl),
+        String(limit),
+        String(blockDuration || ttl),
+      )) as [number, number, number, number];
+    } catch (err) {
+      this.warn(err as Error);
+      return {
+        totalHits: 0,
+        timeToExpire: Math.ceil(ttl / 1000),
+        isBlocked: false,
+        timeToBlockExpire: 0,
+      };
+    }
+    const [hits, windowLeft, blocked, blockLeft] = result;
     return {
       totalHits: hits,
       timeToExpire: Math.max(0, Math.ceil(windowLeft / 1000)),
       isBlocked: blocked === 1,
       timeToBlockExpire: Math.max(0, Math.ceil(blockLeft / 1000)),
     };
+  }
+
+  /** At most one warning per 30 s while Redis is unavailable. */
+  private warn(err: Error): void {
+    if (Date.now() - this.lastWarning < 30_000) return;
+    this.lastWarning = Date.now();
+    this.logger.warn(`Rate limiting suspended, Redis unavailable: ${err.message}`);
   }
 }

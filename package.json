@@ -20,8 +20,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:cov": "jest --coverage --coverageReporters=text-summary --coverageReporters=json-summary --coverageReporters=lcov",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "test:int": "jest --config ./test/jest-int.json --runInBand",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -29,7 +29,8 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "ts-node prisma/seed.ts",
     "credentials:reencrypt": "node dist/scripts/reencrypt-credentials.js",
-    "credentials:reencrypt:dev": "ts-node src/scripts/reencrypt-credentials.ts"
+    "credentials:reencrypt:dev": "ts-node src/scripts/reencrypt-credentials.ts",
+    "test:all": "jest --config ./test/jest-all.json --runInBand --coverage"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -83,37 +84,6 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "setupFiles": [
-      "<rootDir>/../test/support/block-external-http.ts"
-    ],
-    "transform": {
-      "^.+\\.(t|j)s$": [
-        "ts-jest",
-        {
-          "tsconfig": "<rootDir>/../tsconfig.spec.json"
-        }
-      ]
-    },
-    "collectCoverageFrom": [
-      "**/*.ts",
-      "!**/*.spec.ts",
-      "!main.ts",
-      "!worker.ts"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
-    }
   },
   "overrides": {
     "@prisma/config": {
