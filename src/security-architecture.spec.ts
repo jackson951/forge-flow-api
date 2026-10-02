@@ -10,7 +10,10 @@ const ALLOWED_CREDENTIAL_IMPORTERS = new Set([
   'modules/integrations/integrations.module.ts',
   'modules/integrations/integrations.service.ts', // OAuth completion, revoke on disconnect
   'modules/integrations/providers/integration-provider.interface.ts', // type only
+  'modules/integrations/providers/slack.provider.ts', // type only (revoke receives the credential)
   'scripts/reencrypt-credentials.ts',
+  'execution/execution.module.ts', // worker DI only
+  'execution/worker-connections.ts', // decrypts for node handlers, scoped to the run's workspace
 ]);
 
 function tsFiles(dir: string): string[] {

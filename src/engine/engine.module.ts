@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { aiNodeTypes } from '../modules/ai/ai.node-types';
 import { GITHUB_NODE_TYPES } from '../modules/integrations/github/github.node-types';
+import { SLACK_NODE_TYPES } from '../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from './catalog/node-type-catalog';
 import { DefinitionValidatorService } from './executor/definition-validator.service';
 
@@ -20,6 +21,7 @@ import { DefinitionValidatorService } from './executor/definition-validator.serv
         new NodeTypeCatalog([
           ...BUILT_IN_NODE_TYPES,
           ...GITHUB_NODE_TYPES,
+          ...SLACK_NODE_TYPES,
           ...aiNodeTypes(Boolean(config.ai.provider)),
         ]),
     },
