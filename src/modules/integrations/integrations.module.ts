@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CredentialStore } from './credentials/credential-store';
 import { GitHubClient } from './github/github-client';
 import { IntegrationProvidersController, IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
@@ -13,6 +14,7 @@ import { SlackProvider } from './providers/slack.provider';
 @Module({
   controllers: [IntegrationsController, IntegrationProvidersController],
   providers: [
+    CredentialStore,
     GitHubClient,
     GitHubProvider,
     MicrosoftProvider,
@@ -24,6 +26,6 @@ import { SlackProvider } from './providers/slack.provider';
     },
     IntegrationsService,
   ],
-  exports: [IntegrationsService, GitHubClient],
+  exports: [IntegrationsService, GitHubClient, CredentialStore],
 })
 export class IntegrationsModule {}

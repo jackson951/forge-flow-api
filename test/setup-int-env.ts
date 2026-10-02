@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { loadDotEnv, resolveTestDatabaseUrl } from './support/test-database';
 
 // Runs before each integration test file: point everything at the isolated test database.
@@ -14,3 +15,6 @@ process.env.QUEUE_BACKOFF_MS ??= '50';
 process.env.QUEUE_JOB_ATTEMPTS ??= '3';
 // Enables the non-production TEST webhook provider.
 process.env.WEBHOOK_TEST_SECRET ??= 'integration-test-webhook-secret';
+// Credential encryption for tests (fresh random key per test file; DB is truncated per suite).
+process.env.ENCRYPTION_KEYS ??= `test1:${randomBytes(32).toString('base64')}`;
+process.env.ENCRYPTION_ACTIVE_KEY_ID ??= 'test1';

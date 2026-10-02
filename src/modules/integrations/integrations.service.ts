@@ -13,6 +13,8 @@ import { AppConfigService } from '../../config/app-config.service';
 import { ExecutionError } from '../../engine/errors';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { EncryptionService } from '../../infrastructure/crypto/encryption.service';
+import { CredentialStore } from './credentials/credential-store';
 import { GitHubClient, GitHubRepository } from './github/github-client';
 import {
   ConnectionDeniedError,
@@ -50,6 +52,8 @@ export class IntegrationsService {
     private readonly config: AppConfigService,
     private readonly audit: AuditService,
     private readonly github: GitHubClient,
+    private readonly credentials: CredentialStore,
+    private readonly encryption: EncryptionService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(IntegrationsService.name);
@@ -159,9 +163,29 @@ export class IntegrationsService {
     }
   }
 
-  /** Unbinds the connection from this workspace. Triggers using it stop matching events. */
+  /**
+   * Revokes at the provider where supported (best effort), then deletes the connection and,
+   * by cascade, its encrypted credentials. Triggers using it stop matching events.
+   */
   async disconnect(access: WorkspaceAccess, connectionId: string): Promise<void> {
     const connection = await this.findConnection(access.workspaceId, connectionId);
+    const provider = this.providers.find((p) => p.key === connection.provider);
+    let revoked: boolean | null = null;
+    if (provider?.revoke && this.encryption.isConfigured()) {
+      const credential = await this.credentials.get(access.workspaceId, connection.id);
+      if (credential?.accessToken || credential?.refreshToken) {
+        revoked = await provider.revoke(credential).then(
+          () => true,
+          (err: Error) => {
+            this.logger.warn(
+              { provider: connection.provider, error: err.message },
+              'Provider revocation failed; deleting locally anyway',
+            );
+            return false;
+          },
+        );
+      }
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.integrationConnection.delete({ where: { id: connection.id } });
       await this.audit.record(
@@ -171,7 +195,7 @@ export class IntegrationsService {
           actorUserId: access.userId,
           targetType: 'IntegrationConnection',
           targetId: connection.id,
-          metadata: { provider: connection.provider },
+          metadata: { provider: connection.provider, revokedAtProvider: revoked },
         },
         tx,
       );

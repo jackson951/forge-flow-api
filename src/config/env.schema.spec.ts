@@ -36,6 +36,42 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...base, THROTTLE_ENABLED: 'false' }).THROTTLE_ENABLED).toBe(false);
   });
 
+  describe('encryption keys', () => {
+    const key = Buffer.alloc(32, 7).toString('base64');
+
+    it('accepts a valid keyring with an existing active key', () => {
+      expect(
+        validateEnv({ ...base, ENCRYPTION_KEYS: `k1:${key}`, ENCRYPTION_ACTIVE_KEY_ID: 'k1' })
+          .ENCRYPTION_KEYS,
+      ).toBe(`k1:${key}`);
+    });
+
+    it('rejects a short key without echoing it, and an unknown active id', () => {
+      const short = Buffer.alloc(8, 1).toString('base64');
+      expect(() =>
+        validateEnv({ ...base, ENCRYPTION_KEYS: `k1:${short}`, ENCRYPTION_ACTIVE_KEY_ID: 'k1' }),
+      ).toThrow(/ENCRYPTION_KEYS: key "k1" must be 32 bytes/);
+      try {
+        validateEnv({ ...base, ENCRYPTION_KEYS: `k1:${short}` });
+      } catch (err) {
+        expect((err as Error).message).not.toContain(short);
+      }
+      expect(() =>
+        validateEnv({ ...base, ENCRYPTION_KEYS: `k1:${key}`, ENCRYPTION_ACTIVE_KEY_ID: 'k2' }),
+      ).toThrow(/ENCRYPTION_ACTIVE_KEY_ID/);
+    });
+
+    it('requires keys in production when Slack or Microsoft is configured', () => {
+      const prod = {
+        ...base,
+        NODE_ENV: 'production',
+        CORS_ORIGINS: 'https://app.example.com',
+        SLACK_CLIENT_ID: 'x',
+      };
+      expect(() => validateEnv(prod)).toThrow(/ENCRYPTION_KEYS: required in production/);
+    });
+  });
+
   it('rejects an invalid enum value', () => {
     expect(() => validateEnv({ ...base, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
   });
