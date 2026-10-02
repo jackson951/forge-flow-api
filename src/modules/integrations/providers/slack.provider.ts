@@ -1,20 +1,22 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
 import { IntegrationProviderKey } from '@prisma/client';
-import { IntegrationProvider, OAuthTokens } from './integration-provider.interface';
+import { ConnectionDetails, IntegrationProvider } from './integration-provider.interface';
 
+/** Slack connection — implemented in Part 13. Reports itself as not configured until then. */
 @Injectable()
 export class SlackProvider implements IntegrationProvider {
   readonly key = IntegrationProviderKey.SLACK;
+  readonly slug = 'slack';
 
-  buildAuthorizationUrl(_state: string): string {
+  isConfigured(): boolean {
+    return false;
+  }
+
+  connectUrl(): string {
     throw new NotImplementedException();
   }
 
-  exchangeCode(_code: string): Promise<OAuthTokens> {
-    throw new NotImplementedException();
-  }
-
-  refresh(_refreshToken: string): Promise<OAuthTokens> {
+  completeConnection(): Promise<ConnectionDetails> {
     throw new NotImplementedException();
   }
 }

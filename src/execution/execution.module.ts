@@ -4,9 +4,11 @@ import { AppConfigService } from '../config/app-config.service';
 import { NodeTypeCatalog } from '../engine/catalog/node-type-catalog';
 import { EngineModule } from '../engine/engine.module';
 import { BUILT_IN_HANDLERS } from '../engine/execution/built-in-handlers';
-import { ExecutionEngine, identityResolver } from '../engine/execution/execution-engine';
+import { ExecutionEngine } from '../engine/execution/execution-engine';
+import { createExpressionResolver } from '../engine/expressions/expression-resolver';
 import { NodeHandlerRegistry } from '../engine/execution/handler-registry';
 import { NODE_HANDLERS, NodeHandler } from '../engine/execution/node-handler';
+import { GITHUB_HANDLERS } from '../modules/integrations/github/github.node-types';
 import { PrismaRunStore } from './prisma-run-store';
 import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
 import { RunWorkerService } from './run-worker.service';
@@ -16,7 +18,7 @@ import { RunWorkerService } from './run-worker.service';
   imports: [EngineModule],
   providers: [
     PrismaRunStore,
-    { provide: NODE_HANDLERS, useValue: BUILT_IN_HANDLERS },
+    { provide: NODE_HANDLERS, useValue: [...BUILT_IN_HANDLERS, ...GITHUB_HANDLERS] },
     {
       provide: NodeHandlerRegistry,
       inject: [NODE_HANDLERS],
@@ -32,7 +34,10 @@ import { RunWorkerService } from './run-worker.service';
         logger: PinoLogger,
       ) => {
         logger.setContext(ExecutionEngine.name);
-        return new ExecutionEngine(store, registry, identityResolver, {
+        const resolver = createExpressionResolver((nodeKey, references) =>
+          logger.warn({ nodeKey, references }, 'References resolved to nothing; rendered as empty'),
+        );
+        return new ExecutionEngine(store, registry, resolver, {
           nodeTimeoutMs: config.queue.nodeTimeoutMs,
           log: (level, message, fields) => logger[level](fields, message),
         });

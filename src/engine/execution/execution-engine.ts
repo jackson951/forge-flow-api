@@ -10,15 +10,16 @@ import { NodeHandler, NodeLogger, NodeResult } from './node-handler';
 import { RunSnapshot, RunStore, StepSnapshot } from './run-store';
 import { jsonByteLength, sanitizeForStorage, toPlainJson } from './sanitize';
 
-/** Turns a node's stored config into the config the handler receives (Part 11). */
+/** Turns a node's stored config into the config the handler receives (data mapping). */
 export interface ValueResolver {
   resolve(
     config: Record<string, unknown>,
     scope: { triggerInput: unknown; outputs: Readonly<Record<string, unknown>> },
+    node: Pick<NodeDefinition, 'key' | 'kind' | 'type'>,
   ): Record<string, unknown>;
 }
 
-/** Until Part 11: configs are used as written. */
+/** Configs used exactly as written (unit tests). */
 export const identityResolver: ValueResolver = { resolve: (config) => config };
 
 export interface EngineOptions {
@@ -145,7 +146,11 @@ export class ExecutionEngine {
 
     let config: Record<string, unknown>;
     try {
-      config = this.resolver.resolve(node.config, { triggerInput: run.triggerInput, outputs });
+      config = this.resolver.resolve(
+        node.config,
+        { triggerInput: run.triggerInput, outputs },
+        node,
+      );
     } catch (err) {
       return this.fail(run.id, node, attempt, 0, err);
     }

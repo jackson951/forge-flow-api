@@ -109,7 +109,7 @@ describe('validateDefinition', () => {
       ]);
     });
 
-    it('INVALID_NODE_CONFIG for unknown config keys and bad condition shape', () => {
+    it('INVALID_NODE_CONFIG for unknown config keys; INVALID_CONDITION for a bad condition', () => {
       const d = def(
         [
           trigger(),
@@ -118,11 +118,84 @@ describe('validateDefinition', () => {
         ],
         [edge('trigger', 'a'), edge('a', 'c')],
       );
-      expect(
-        only(d, 'INVALID_NODE_CONFIG')
-          .map((i) => i.nodeKey)
-          .sort(),
-      ).toEqual(['a', 'c']);
+      expect(only(d, 'INVALID_NODE_CONFIG').map((i) => i.nodeKey)).toEqual(['a']);
+      expect(only(d, 'INVALID_CONDITION').map((i) => i.nodeKey)).toEqual(['c']);
+    });
+
+    describe('data references (Part 11)', () => {
+      const withRefs = (aConfig: Record<string, unknown>, cConfig?: Record<string, unknown>) =>
+        def(
+          [
+            trigger(),
+            { key: 'a', kind: 'ACTION', type: 'util.log', config: aConfig },
+            condition('c'),
+            { key: 'b', kind: 'ACTION', type: 'util.log', config: cConfig ?? { message: 'b' } },
+            log('side'),
+          ],
+          [edge('trigger', 'a'), edge('a', 'c'), edge('c', 'b', 'true'), edge('trigger', 'side')],
+        );
+
+      it('accepts references to the trigger and to ancestors', () => {
+        expect(
+          validate(
+            withRefs(
+              { message: 'Issue {{ trigger.issue.title }}' },
+              { message: '{{ steps.a.output.message }} / {{ steps.c.output.result }}' },
+            ),
+          ),
+        ).toEqual([]);
+      });
+
+      it('INVALID_REFERENCE for malformed or dangerous references', () => {
+        const issues = only(
+          withRefs({ message: '{{ trigger.__proto__.x }} {{ env.SECRET }}' }),
+          'INVALID_REFERENCE',
+        );
+        expect(issues).toHaveLength(2);
+        expect(issues[0]).toMatchObject({ nodeKey: 'a' });
+      });
+
+      it('UNKNOWN_REFERENCE_NODE', () => {
+        expect(
+          only(withRefs({ message: '{{ steps.ghost.output.x }}' }), 'UNKNOWN_REFERENCE_NODE'),
+        ).toEqual([expect.objectContaining({ nodeKey: 'a' })]);
+      });
+
+      it('NON_ANCESTOR_REFERENCE for later, sibling-branch and self references', () => {
+        const later = withRefs({ message: '{{ steps.b.output.message }}' });
+        const sibling = withRefs({ message: 'x' }, { message: '{{ steps.side.output.message }}' });
+        const self = withRefs({ message: '{{ steps.a.output.message }}' });
+        for (const d of [later, sibling, self]) {
+          expect(only(d, 'NON_ANCESTOR_REFERENCE')).toHaveLength(1);
+        }
+      });
+
+      it('checks { ref } operands in conditions, but treats condition values as literals', () => {
+        const d = def(
+          [
+            trigger(),
+            log('a'),
+            {
+              key: 'c',
+              kind: 'CONDITION',
+              type: 'condition',
+              config: {
+                all: [
+                  { left: { ref: 'steps.later.output.x' }, operator: 'exists' },
+                  {
+                    left: { ref: 'trigger.x' },
+                    operator: 'equals',
+                    right: { value: '{{ not a ref }}' },
+                  },
+                ],
+              },
+            },
+            log('later'),
+          ],
+          [edge('trigger', 'a'), edge('a', 'c'), edge('c', 'later', 'true')],
+        );
+        expect(codes(validate(d))).toEqual(['NON_ANCESTOR_REFERENCE']);
+      });
     });
 
     it.each([

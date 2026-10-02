@@ -14,11 +14,11 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 04 | [Workspaces and Authorization](04-WORKSPACES-AND-AUTHORIZATION.md) | COMPLETE | All 7 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #4, `main`) |
 | 05 | [Workflow Management](05-WORKFLOW-MANAGEMENT.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #5, `main`) |
 | 06 | [Workflow Versioning and Publishing](06-WORKFLOW-VERSIONING-AND-PUBLISHING.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #6, `main`) |
-| 07 | [Queue and Worker Infrastructure](07-QUEUE-AND-WORKER-INFRASTRUCTURE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01 (integration + live API/worker processes). Not yet pushed/CI-verified |
-| 08 | [Workflow Execution Engine](08-WORKFLOW-EXECUTION-ENGINE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01 (engine unit tests incl. crash/resume, integration with real worker). Built-in `condition` node is a placeholder until Part 11. Not yet pushed/CI-verified |
-| 09 | [Webhook Platform](09-WEBHOOK-PLATFORM.md) | NOT STARTED | Controller with raw body; service throws 501 |
-| 10 | [GitHub Integration](10-GITHUB-INTEGRATION.md) | NOT STARTED | Provider stub |
-| 11 | [Conditions and Data Mapping](11-CONDITIONS-AND-DATA-MAPPING.md) | NOT STARTED | Evaluator stub |
+| 07 | [Queue and Worker Infrastructure](07-QUEUE-AND-WORKER-INFRASTRUCTURE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #7, `main`) |
+| 08 | [Workflow Execution Engine](08-WORKFLOW-EXECUTION-ENGINE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #7, `main`). Condition placeholder replaced in Part 11 |
+| 09 | [Webhook Platform](09-WEBHOOK-PLATFORM.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-01; signed intake, unique-delivery dedup (10 concurrent copies → 1 run), test provider. Not yet pushed/CI-verified |
+| 10 | [GitHub Integration](10-GITHUB-INTEGRATION.md) | BLOCKED | Implemented; AC-10.2–10.6 verified 2026-10-02 (fake GitHub, mutation-checked isolation, log scan). **Blocked on AC-10.1:** needs a registered GitHub App for a real github.com event — setup guide in the spec |
+| 11 | [Conditions and Data Mapping](11-CONDITIONS-AND-DATA-MAPPING.md) | COMPLETE | All 5 acceptance criteria verified 2026-10-01; nested AND/OR/NOT, 13 operators, templates; no code execution. Not yet pushed/CI-verified |
 | 12 | [AI Integration](12-AI-INTEGRATION.md) | NOT STARTED | Service stub |
 | 13 | [Slack Integration](13-SLACK-INTEGRATION.md) | NOT STARTED | Provider stub |
 | 14 | [Microsoft Graph Integration](14-MICROSOFT-GRAPH-INTEGRATION.md) | NOT STARTED | Provider stub |
@@ -241,3 +241,6 @@ flowchart TD
 | 2026-10-01 | Part 04 CI green on GitHub. Part 05 implemented and verified → COMPLETE; fixed body-parser errors returning 500 (Part 01 code). Next: Part 06. |
 | 2026-10-01 | Part 05 CI green on GitHub. Part 06 implemented and verified → COMPLETE. Next: Part 07. |
 | 2026-10-01 | Part 06 CI green on GitHub. Parts 07 and 08 implemented and verified → COMPLETE. Next: Part 11 (completes conditions), then 09. |
+| 2026-10-01 | Parts 07–08 CI green on GitHub. Part 11 implemented and verified → COMPLETE (extended with nested groups and more operators on request). Next: Part 09, then 10. |
+| 2026-10-01 | Part 09 implemented and verified → COMPLETE. Next: Part 10. |
+| 2026-10-02 | Part 10 implemented; all criteria verified except a real github.com event → BLOCKED until a GitHub App is registered. Added publish-time connection check (cross-workspace connection ids). Next: Part 12 (or 17 for credential encryption before Slack). |
