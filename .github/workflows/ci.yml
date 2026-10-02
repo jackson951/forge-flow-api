@@ -5,13 +5,20 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege for every job.
 permissions:
   contents: read
 
+# A newer push to the same branch/PR cancels the older run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Quality gate (docs/backend/19-TESTING-AND-QUALITY-GATE.md). Every step must pass.
   build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     services:
       postgres:
@@ -31,13 +38,11 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
 
-    # Throwaway values for the ephemeral CI services only.
     env:
+      # Ephemeral CI services only.
       DATABASE_URL: postgresql://flowforge:flowforge@localhost:5432/flowforge?schema=public
       REDIS_HOST: localhost
       REDIS_PORT: 6379
-      JWT_ACCESS_SECRET: ci-only-access-secret-0123456789abcdef
-      JWT_REFRESH_SECRET: ci-only-refresh-secret-0123456789abcdef
 
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +50,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Quality gate (docs/backend/19-TESTING-AND-QUALITY-GATE.md). Every step must pass.
+      - name: Generate throwaway secrets for this run
+        # Random per run, masked in logs, never stored anywhere.
+        run: |
+          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
       - name: 1. Install
         run: npm ci
       - name: 2. Prisma schema and migrations on a fresh database
@@ -74,3 +86,39 @@ jobs:
           name: coverage
           path: coverage/
           if-no-files-found: ignore
+
+  # 9. Docker images (Part 20): built, never pushed; then scanned (report only).
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime image (API + worker)
+        run: docker build --target runtime -t flowforge-api:ci .
+      - name: Build migrate image
+        run: docker build --target migrate -t flowforge-migrate:ci .
+      - name: Image runs as non-root and has no dev dependencies
+        run: |
+          test "$(docker run --rm flowforge-api:ci id -u)" != "0"
+          ! docker run --rm flowforge-api:ci test -d node_modules/typescript
+          ! docker run --rm flowforge-api:ci test -e .env
+      - name: Vulnerability scan (non-blocking, see docs/backend/20-*)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: flowforge-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+  # No secrets in the repository or its history (AC-20.6).
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (full history)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2 \
+            git /repo --redact --verbose --exit-code 1
