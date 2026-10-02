@@ -131,7 +131,7 @@ describe('ExecutionEngine', () => {
 
     it('redacts credential-like keys in stored outputs', async () => {
       const { engine, store } = setup([node('a')], [edge('trigger', 'a')], {
-        behave: { a: async () => ({ accessToken: 'xoxb-secret', ok: true }) },
+        behave: { a: async () => ({ accessToken: 'provider-access-token', ok: true }) },
       });
       await engine.execute(RUN, lastAttempt);
       expect(store.steps.get('a')?.output).toEqual({ accessToken: '[REDACTED]', ok: true });

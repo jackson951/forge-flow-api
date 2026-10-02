@@ -1,4 +1,5 @@
 import { IntegrationProviderKey } from '@prisma/client';
+import { Credential } from '../credentials/credential-store';
 
 /** What a provider learns when a connection is completed. Never contains secrets. */
 export interface ConnectionDetails {
@@ -33,6 +34,8 @@ export interface IntegrationProvider {
   connectUrl(state: string): string;
   /** Called with the callback query after `state` was verified and consumed. */
   completeConnection(query: Record<string, string | undefined>): Promise<ConnectionDetails>;
+  /** Best-effort revocation at the provider on disconnect (if the provider supports it). */
+  revoke?(credential: Credential): Promise<void>;
 }
 
 export const INTEGRATION_PROVIDERS = Symbol('INTEGRATION_PROVIDERS');

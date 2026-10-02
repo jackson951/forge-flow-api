@@ -1,3 +1,4 @@
+import { looksLikeSecret } from '../../common/security/redaction';
 import { NodeTypeCatalog } from '../catalog/node-type-catalog';
 import { collectReferences } from '../expressions/mapping';
 import { parseReference, Reference } from '../expressions/reference';
@@ -304,15 +305,17 @@ export function validateDefinition(
 
 export const hasErrors = (issues: ValidationIssue[]) => issues.some((i) => i.severity === 'error');
 
+/** Paths of credential-like keys or token-shaped values inside a node config. */
 function findSecretKeys(value: unknown, path: string[] = []): string[] {
+  if (typeof value === 'string') return looksLikeSecret(value) ? [path.join('.')] : [];
   if (Array.isArray(value)) {
     return value.flatMap((item, i) => findSecretKeys(item, [...path, String(i)]));
   }
   if (value === null || typeof value !== 'object') return [];
   return Object.entries(value).flatMap(([key, child]) => {
     const here = [...path, key];
-    const own = SECRET_KEY.test(key) && !ALLOWED_KEY_NAMES.has(key) ? [here.join('.')] : [];
-    return [...own, ...findSecretKeys(child, here)];
+    if (SECRET_KEY.test(key) && !ALLOWED_KEY_NAMES.has(key)) return [here.join('.')];
+    return findSecretKeys(child, here);
   });
 }
 

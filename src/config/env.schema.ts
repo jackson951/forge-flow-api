@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseKeyring } from '../infrastructure/crypto/envelope';
 
 const booleanString = z
   .enum(['true', 'false'])
@@ -55,7 +56,9 @@ export const envSchema = z
     JWT_ISSUER: z.string().default('flowforge'),
     JWT_AUDIENCE: z.string().default('flowforge-api'),
 
-    ENCRYPTION_KEY: z.string().optional(),
+    /** "k1:<base64 32 bytes>[,k2:…]" — keys for credentials at rest (Part 17). */
+    ENCRYPTION_KEYS: z.string().optional(),
+    ENCRYPTION_ACTIVE_KEY_ID: z.string().optional(),
 
     /** Where OAuth callbacks send the browser back to (frontend). */
     FRONTEND_URL: z.string().url().default('http://localhost:5173'),
@@ -88,7 +91,35 @@ export const envSchema = z
     AI_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   })
   .superRefine((env, ctx) => {
+    if (env.ENCRYPTION_KEYS) {
+      try {
+        const keyring = parseKeyring(env.ENCRYPTION_KEYS);
+        if (!env.ENCRYPTION_ACTIVE_KEY_ID || !keyring.has(env.ENCRYPTION_ACTIVE_KEY_ID)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['ENCRYPTION_ACTIVE_KEY_ID'],
+            message: 'must name one of the ENCRYPTION_KEYS ids',
+          });
+        }
+      } catch (err) {
+        // Only the reason is reported, never key material.
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ENCRYPTION_KEYS'],
+          message: (err as Error).message,
+        });
+      }
+    }
+
     if (env.NODE_ENV !== 'production') return;
+
+    if ((env.SLACK_CLIENT_ID || env.MICROSOFT_CLIENT_ID) && !env.ENCRYPTION_KEYS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ENCRYPTION_KEYS'],
+        message: 'required in production when token-storing integrations are configured',
+      });
+    }
 
     for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'] as const) {
       if (env[key].startsWith(PLACEHOLDER_PREFIX)) {

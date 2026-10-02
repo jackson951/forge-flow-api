@@ -24,7 +24,7 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 14 | [Microsoft Graph Integration](14-MICROSOFT-GRAPH-INTEGRATION.md) | NOT STARTED | Provider stub |
 | 15 | [Idempotency and Side-Effect Safety](15-IDEMPOTENCY-AND-SIDE-EFFECT-SAFETY.md) | NOT STARTED | — |
 | 16 | [Run History and Observability](16-RUN-HISTORY-AND-OBSERVABILITY.md) | NOT STARTED | Runs/dashboard stubs |
-| 17 | [Integration Credential Security](17-INTEGRATION-CREDENTIAL-SECURITY.md) | NOT STARTED | Encryption stub; log redaction path list exists |
+| 17 | [Integration Credential Security](17-INTEGRATION-CREDENTIAL-SECURITY.md) | COMPLETE | All 7 acceptance criteria verified 2026-10-02; AES-256-GCM with AAD, key rotation CLI, shared redactor in storage/validator/logs, architecture test. Not yet pushed/CI-verified |
 | 18 | [Rate Limiting and API Hardening](18-RATE-LIMITING-AND-API-HARDENING.md) | NOT STARTED | In-memory throttler with per-route limits on auth/webhooks |
 | 19 | [Testing and Quality Gate](19-TESTING-AND-QUALITY-GATE.md) | IN PROGRESS | Unit, e2e and integration configs exist (`test:int` with isolated `*_test` DB, factories, truncation). E2E journey, coverage thresholds not started |
 | 20 | [CI/CD and Containerization](20-CI-CD-AND-CONTAINERIZATION.md) | IN PROGRESS | Dockerfile, Compose (dev defaults, localhost ports), CI with Postgres/Redis services running format, lint, typecheck, unit, migrate, e2e, integration, build — green on GitHub. Missing: migrate service in Compose, audit, image build in CI, secret scan |
@@ -244,3 +244,4 @@ flowchart TD
 | 2026-10-01 | Parts 07–08 CI green on GitHub. Part 11 implemented and verified → COMPLETE (extended with nested groups and more operators on request). Next: Part 09, then 10. |
 | 2026-10-01 | Part 09 implemented and verified → COMPLETE. Next: Part 10. |
 | 2026-10-02 | Part 10 implemented; all criteria verified except a real github.com event → BLOCKED until a GitHub App is registered. Added publish-time connection check (cross-workspace connection ids). Next: Part 12 (or 17 for credential encryption before Slack). |
+| 2026-10-02 | Parts 09–11 CI green on GitHub (PR #8). Part 17 implemented and verified → COMPLETE (pulled forward before Slack). Next: Part 12 (AI) or 13 (Slack). |
