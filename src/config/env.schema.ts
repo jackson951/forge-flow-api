@@ -84,6 +84,8 @@ export const envSchema = z
     SLACK_CLIENT_ID: z.string().optional(),
     SLACK_CLIENT_SECRET: z.string().optional(),
     SLACK_SIGNING_SECRET: z.string().optional(),
+    SLACK_API_URL: z.string().url().default('https://slack.com/api'),
+    SLACK_OAUTH_URL: z.string().url().default('https://slack.com/oauth/v2/authorize'),
     OAUTH_REDIRECT_BASE_URL: z.string().url().optional(),
 
     /** Enables the non-production `test` webhook provider (Part 09). Ignored in production. */

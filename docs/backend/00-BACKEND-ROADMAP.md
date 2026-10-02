@@ -20,7 +20,7 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 10 | [GitHub Integration](10-GITHUB-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified; AC-10.1 with real github.com events 2026-10-02 (issue #12 → run SUCCEEDED, label branch and mapped message). Fixed OAuth `code`/`state` in request logs. Not yet pushed/CI-verified |
 | 11 | [Conditions and Data Mapping](11-CONDITIONS-AND-DATA-MAPPING.md) | COMPLETE | All 5 acceptance criteria verified 2026-10-01; nested AND/OR/NOT, 13 operators, templates; no code execution. Not yet pushed/CI-verified |
 | 12 | [AI Integration](12-AI-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-02; Anthropic provider + deterministic fake, summarize/classify/extract with zod validation and one repair, worker-only, external HTTP blocked in tests. Not yet pushed/CI-verified |
-| 13 | [Slack Integration](13-SLACK-INTEGRATION.md) | NOT STARTED | Provider stub |
+| 13 | [Slack Integration](13-SLACK-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-02, incl. a real Slack workspace (flagship: GitHub issue → AI → HIGH → Slack message; LOW → none). Run queue now honours provider `Retry-After`. Not yet pushed/CI-verified |
 | 14 | [Microsoft Graph Integration](14-MICROSOFT-GRAPH-INTEGRATION.md) | NOT STARTED | Provider stub |
 | 15 | [Idempotency and Side-Effect Safety](15-IDEMPOTENCY-AND-SIDE-EFFECT-SAFETY.md) | NOT STARTED | — |
 | 16 | [Run History and Observability](16-RUN-HISTORY-AND-OBSERVABILITY.md) | NOT STARTED | Runs/dashboard stubs |
@@ -247,3 +247,4 @@ flowchart TD
 | 2026-10-02 | Parts 09–11 CI green on GitHub (PR #8). Part 17 implemented and verified → COMPLETE (pulled forward before Slack). Next: Part 12 (AI) or 13 (Slack). |
 | 2026-10-02 | Part 17 CI green (PR #9). Part 12 implemented and verified → COMPLETE. AI `text` also accepts `{ ref }` because Part 11 caps templates at 16 KB. Next: Part 13 (Slack). |
 | 2026-10-02 | Part 12 merged (PR #10). Part 10 verified with the real GitHub App → COMPLETE; request logs now redact OAuth `code`/`state`. Next: Part 13 (Slack). |
+| 2026-10-02 | Part 13 implemented and verified with a real Slack workspace → COMPLETE (flagship workflow works end to end). Run jobs now use a custom backoff that honours `Retry-After`. Next: Part 14 (Microsoft Graph) or 15 (idempotency). |
