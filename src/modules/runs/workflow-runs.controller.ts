@@ -16,6 +16,7 @@ import {
   ApiConflictResponse,
   ApiHeader,
   ApiTags,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CurrentWorkspace } from '../../common/decorators';
@@ -41,6 +42,7 @@ export class WorkflowRunsController {
   @ApiAcceptedResponse({ description: '{ runId, status }' })
   @ApiConflictResponse({ description: 'Not published, archived, or not manually triggerable' })
   @Post()
+  @ApiOperation({ summary: 'Queue a manual run of the active version (202; a worker executes it)' })
   start(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('workflowId', ParseUUIDPipe) workflowId: string,

@@ -2,7 +2,7 @@
 
 Backend for **FlowForge** — an integration & workflow automation platform. NestJS 11 · TypeScript · PostgreSQL/Prisma · Redis/BullMQ.
 
-> Status: foundation, data model, authentication, workspace authorization, workflow management, publishing, the run queue/worker, the execution engine with conditions and data mapping, the webhook platform and the GitHub integration are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
+> Status: all 22 backend parts are implemented — auth, workspaces, workflows with immutable versions, queue + worker + execution engine, webhooks, GitHub / Slack / Microsoft To Do / AI integrations, idempotency, run history, credential encryption, hardening, CI and containers. What is verified, what is limited and what is deferred: **[Release readiness](docs/backend/22-BACKEND-RELEASE-READINESS.md)**. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
 
 ## Quick start
 
@@ -10,10 +10,13 @@ Backend for **FlowForge** — an integration & workflow automation platform. Nes
 cp .env.example .env            # local-development values only
 docker compose up -d postgres redis
 npm install
+npx prisma generate             # needed with npm ≥ 11, which skips dependency install scripts
 npx prisma migrate deploy
 npm run start:dev               # API  → http://localhost:3000/api/v1
 npm run worker:dev              # worker (second terminal)
 ```
+
+Requires Node.js 22 and Docker. The worker's watch build goes to `dist-worker/`, so both watchers can run at once. If something does not start, see [Troubleshooting](docs/backend/22-BACKEND-RELEASE-READINESS.md#troubleshooting).
 
 Swagger (when `SWAGGER_ENABLED`, default outside production): http://localhost:3000/api/docs · Liveness: `GET /api/v1/health` · Readiness (Postgres + Redis, 503 if either is down): `GET /api/v1/health/ready`
 
@@ -36,7 +39,7 @@ All endpoints are versioned under `/api/v1`. Errors use one envelope: `{ statusC
 | Command | Purpose |
 | --- | --- |
 | `npm run build` | Compile to `dist/` (API → `dist/main.js`, worker → `dist/worker.js`) |
-| `npm run start:dev` / `worker:dev` | Watch mode |
+| `npm run start:dev` / `worker:dev` | Watch mode (API builds to `dist/`, worker to `dist-worker/`) |
 | `npm run lint` / `typecheck` | ESLint / `tsc --noEmit` |
 | `npm test` / `test:cov` | Unit tests (no external services); `test:cov` enforces per-area coverage |
 | `npm run test:int` / `test:e2e` | Integration / E2E tests (need Postgres + Redis) |
@@ -74,11 +77,11 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/node-types` | workflows |
 | `/workspaces/:workspaceId/workflows/:workflowId/runs` (start a manual run; optional `Idempotency-Key`) | runs |
 | `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |
-| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`) | integrations |
+| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`, `/:connectionId` DELETE) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
 | `/workspaces/:workspaceId/dashboard` | dashboard |
 | `/webhooks/:provider` (`github`, `test` in non-production) | webhooks |
-| `/workspaces/:workspaceId/integrations/:connectionId/github/repositories` | integrations |
+| `/workspaces/:workspaceId/integrations/:connectionId/github/repositories`, `/slack/channels`, `/microsoft/todo-lists` | integrations |
 | `/health`, `/health/ready` | health |
 
-See `docs/architecture.md` for the process split and folder map.
+Every operation is documented in Swagger (`/api/docs`) with a summary and its error responses (shared `ErrorResponse` envelope). See `docs/architecture.md` for the process split and folder map, and `scripts/load/` for load tests.

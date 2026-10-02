@@ -19,5 +19,6 @@
     "noImplicitAny": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
-  }
+  },
+  "exclude": ["node_modules", "dist", "dist-worker"]
 }
