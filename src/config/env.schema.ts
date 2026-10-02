@@ -28,6 +28,8 @@ export const envSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
     CORS_ORIGINS: z.string().default('http://localhost:5173'),
+    /** Number of trusted reverse-proxy hops in front of the API (0 = none). */
+    TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
     /** Defaults to enabled outside production. */
     SWAGGER_ENABLED: booleanString,
     /** Rate limiting; may only be disabled outside production (used by tests). */
@@ -107,7 +109,8 @@ export const envSchema = z
     AI_API_KEY: z.string().optional(),
     AI_API_URL: z.string().url().default('https://api.anthropic.com'),
     AI_MODEL: z.preprocess(emptyAsUnset, z.string().default('claude-haiku-4-5-20251001')),
-    AI_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+    /** Outbound calls are capped at 30 s (Part 18). */
+    AI_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(20000),
     AI_MAX_INPUT_CHARS: z.coerce.number().int().min(1_000).max(200_000).default(20_000),
     AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(8_192).default(1_024),
   })

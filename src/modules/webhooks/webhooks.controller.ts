@@ -10,6 +10,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { Public } from '../../common/decorators';
+import { byProviderAndIp, MINUTE, RATE_LIMITS } from '../../common/throttling/rate-limits';
 import { IntakeResult, WebhookIntakeService } from './webhook-intake.service';
 
 type RawRequest = Request & { rawBody?: Buffer; id?: string };
@@ -20,7 +21,13 @@ type RawRequest = Request & { rawBody?: Buffer; id?: string };
 export class WebhooksController {
   constructor(private readonly intake: WebhookIntakeService) {}
 
-  @Throttle({ default: { limit: 600, ttl: 60_000 } })
+  @Throttle({
+    default: {
+      limit: RATE_LIMITS.webhookPerProviderAndIp,
+      ttl: MINUTE,
+      getTracker: byProviderAndIp,
+    },
+  })
   @ApiAcceptedResponse({ description: '{ accepted, duplicate: false, deliveryId, runs }' })
   @ApiOkResponse({ description: 'Duplicate delivery: { accepted, duplicate: true, deliveryId }' })
   @ApiUnauthorizedResponse({ description: 'Invalid signature or outside the replay window' })
