@@ -19,7 +19,17 @@ Swagger (when `SWAGGER_ENABLED`, default outside production): http://localhost:3
 
 All endpoints are versioned under `/api/v1`. Errors use one envelope: `{ statusCode, error, message, details?, requestId, path, timestamp }`; every response carries an `x-request-id` header.
 
-Full stack in containers: `docker compose --profile full up --build`
+## Running with Docker
+
+| Command | What it does |
+| --- | --- |
+| `docker compose up -d postgres redis` | Development infrastructure (Postgres on host port 5433, Redis on 6379, both health-checked, localhost only). The first start also creates the `flowforge_test` database |
+| `docker compose --profile full up --build` | Everything in containers: `migrate` (one-shot `prisma migrate deploy`) → `api` (http://localhost:3000, healthy when `/api/v1/health/ready` answers) and `worker` (healthy while its heartbeat file is fresh) |
+| `docker compose --profile full down` | Stop (graceful: SIGTERM via `init`, 30 s grace period) |
+
+- **One image, two commands:** `flowforge-api:local` runs `node dist/main.js` (API) or `node dist/worker.js` (worker); a separate `migrate` image target carries the Prisma CLI. The runtime image has production dependencies only, runs as a non-root user and contains no `.env`.
+- Containers read `.env` if present and run with `NODE_ENV=production`, so production rules apply (real JWT secrets, `ENCRYPTION_KEYS` when Slack/Microsoft are configured). `AI_PROVIDER_DOCKER` chooses the AI provider inside the stack (`fake` is refused in production).
+- Plain `docker run`: pass `--init` so the app receives SIGTERM.
 
 ## Scripts
 
