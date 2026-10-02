@@ -1,6 +1,6 @@
 # 09 — Webhook Platform
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-01) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -52,7 +52,7 @@ Webhook controller and pipeline, `WebhookProvider` adapter contract (verify, ext
 
 | Method | Path | Auth | Responses |
 | --- | --- | --- | --- |
-| POST | `/api/v1/webhooks/:provider` | Provider signature | `202 { accepted: true, runs: n }`, `200 { duplicate: true }`, `400`, `401`, `404`, `413` |
+| POST | `/api/v1/webhooks/:provider` (slug, e.g. `github`, `test`) | Provider signature | `202 { accepted, duplicate: false, deliveryId, runs }`, `200 { accepted, duplicate: true, deliveryId }`, `400` missing delivery id, `401` bad signature / replay window, `404` unknown or disabled provider, `413` body > 1 MB or event data > 256 KB |
 
 ## Database Changes
 
@@ -105,3 +105,46 @@ Parts 06, 07, 08.
 ## Implementation Notes
 
 Replaces the scaffold `WebhooksService` stub. The scaffold's `ParseEnumPipe` on `:provider` becomes a registry lookup.
+
+## Implementation Evidence
+
+Verified 2026-10-01 on branch `feat/part-11-09-conditions-and-webhooks`.
+
+### What was implemented
+
+| Item | Location |
+| --- | --- |
+| Adapter contract (`verify`, `deliveryId`, `eventName`, `normalize`), constant-time HMAC helper | `src/modules/webhooks/providers/webhook-provider.ts` |
+| Non-production `test` provider: HMAC-SHA256 over `<timestamp>.<raw body>`, 5-minute replay window; enabled only when `NODE_ENV != production` and `WEBHOOK_TEST_SECRET` is set | `providers/test-webhook.provider.ts` |
+| Intake pipeline: verify (no writes on failure) → delivery id → normalise → one transaction (unique delivery insert, trigger match on the active version, one run per workflow with `<provider>:<deliveryId>:<workflowId>`, delivery status/workspace) → enqueue after commit (sweeper fallback) | `webhook-intake.service.ts` |
+| Raw-body parser for `/api/v1/webhooks` with a 1 MB limit, registered before the general 300 KB parser | `src/app.setup.ts` |
+| `TEST` value in `IntegrationProviderKey` (migration `20261001150000_test_webhook_provider`) | `prisma/` |
+| Throttle 600/min per IP on webhook routes; sanitised logs (provider, delivery id, event, run count, duration; never headers or bodies) | controller / service |
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint, typecheck, build | pass |
+| `npm test` | 328 passed |
+| `npm run test:e2e` | 16 passed |
+| `npm run test:int` | 175 passed (14 in `webhooks.int-spec.ts`) |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-09.1 | PASS | Signed delivery → 202 with `runs: 1`; delivery PROCESSED with workspace; run has `triggerSource WEBHOOK`, delivery link, normalised data as trigger input, idempotency key |
+| AC-09.2 | PASS | Wrong secret, tampered body, stale timestamp → 401 and the delivery count is unchanged; missing delivery id → 400; unknown provider → 404. Unit: future timestamp, missing signature/timestamp, truncated or wrong-algorithm signatures |
+| AC-09.3 | PASS | Second send of the same delivery → 200 `duplicate: true`; a re-signed redelivery with the same id is also a duplicate |
+| AC-09.4 | PASS | 10 concurrent copies → exactly one 202, nine 200, one delivery row, one run |
+| AC-09.5 | PASS | Request completes in well under 1 s locally and `fetch` is never called during intake |
+| AC-09.6 | PASS | The worker executes the webhook-created run; a template in the next step renders the webhook data (`got Crash on login`) |
+
+Also verified: one delivery starts every matching published workflow once; deliveries with no matching trigger or an unusable payload are stored as IGNORED with no runs; archived workflows no longer trigger; bodies between 300 KB and 1 MB are accepted on webhook routes only; body > 1 MB and event data > 256 KB → 413.
+
+### Notes
+
+- Event matching uses the routing table maintained at publish (Part 06) and re-checks that each routing row belongs to the workflow's active version.
+- The `test` provider can match workflows in any workspace that uses the same resource key; it exists for development and tests only and is never enabled in production. Real providers bind events to a connected account (Part 10).
+- Delivery retention (30 days) is a Part 21 maintenance job.

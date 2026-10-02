@@ -9,3 +9,5 @@ process.env.QUEUE_PREFIX ??= `ff-test-${process.pid}-${Date.now()}`;
 // Fast retries in tests.
 process.env.QUEUE_BACKOFF_MS ??= '50';
 process.env.QUEUE_JOB_ATTEMPTS ??= '3';
+// Enables the non-production TEST webhook provider.
+process.env.WEBHOOK_TEST_SECRET ??= 'integration-test-webhook-secret';

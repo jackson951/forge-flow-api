@@ -1,4 +1,6 @@
 import { NodeTypeCatalog } from '../catalog/node-type-catalog';
+import { collectReferences } from '../expressions/mapping';
+import { parseReference, Reference } from '../expressions/reference';
 import {
   DEFINITION_LIMITS,
   EdgeDefinition,
@@ -24,7 +26,11 @@ export type IssueCode =
   | 'CYCLE'
   | 'UNREACHABLE_NODE'
   | 'CONDITION_WITHOUT_BRANCH'
-  | 'LIMIT_EXCEEDED';
+  | 'LIMIT_EXCEEDED'
+  | 'INVALID_CONDITION'
+  | 'INVALID_REFERENCE'
+  | 'UNKNOWN_REFERENCE_NODE'
+  | 'NON_ANCESTOR_REFERENCE';
 
 export interface ValidationIssue {
   code: IssueCode;
@@ -134,7 +140,7 @@ export function validateDefinition(
     if (!config.success) {
       for (const issue of config.error.issues) {
         error({
-          code: 'INVALID_NODE_CONFIG',
+          code: node.kind === 'CONDITION' ? 'INVALID_CONDITION' : 'INVALID_NODE_CONFIG',
           nodeKey: node.key,
           path: issue.path.join('.') || undefined,
           message: issue.message,
@@ -215,9 +221,11 @@ export function validateDefinition(
   // ── graph shape (over valid edges only) ──────────────────────────────────
   const incoming = new Map<string, number>();
   const children = new Map<string, string[]>();
+  const parent = new Map<string, string>();
   for (const edge of validEdges) {
     incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
     children.set(edge.from, [...(children.get(edge.from) ?? []), edge.to]);
+    if (!parent.has(edge.to)) parent.set(edge.to, edge.from);
   }
 
   for (const [key, count] of incoming) {
@@ -251,6 +259,35 @@ export function validateDefinition(
     }
   }
 
+  // ── data references (Part 11) ─────────────────────────────────────────────
+  for (const node of nodesByKey.values()) {
+    const ancestors = ancestorsOf(node.key, parent);
+    const references = collectReferences(node.config, { templates: node.kind !== 'CONDITION' });
+    for (const text of references) {
+      let ref: Reference;
+      try {
+        ref = parseReference(text);
+      } catch (err) {
+        error({ code: 'INVALID_REFERENCE', nodeKey: node.key, message: (err as Error).message });
+        continue;
+      }
+      if (ref.root !== 'steps') continue;
+      if (!nodesByKey.has(ref.nodeKey!)) {
+        error({
+          code: 'UNKNOWN_REFERENCE_NODE',
+          nodeKey: node.key,
+          message: `"${text}" refers to unknown node "${ref.nodeKey}"`,
+        });
+      } else if (!ancestors.has(ref.nodeKey!)) {
+        error({
+          code: 'NON_ANCESTOR_REFERENCE',
+          nodeKey: node.key,
+          message: `"${text}" refers to "${ref.nodeKey}", which does not run before this node`,
+        });
+      }
+    }
+  }
+
   for (const node of nodesByKey.values()) {
     if (node.kind === 'CONDITION' && !children.has(node.key)) {
       issues.push({
@@ -277,6 +314,17 @@ function findSecretKeys(value: unknown, path: string[] = []): string[] {
     const own = SECRET_KEY.test(key) && !ALLOWED_KEY_NAMES.has(key) ? [here.join('.')] : [];
     return [...own, ...findSecretKeys(child, here)];
   });
+}
+
+/** Nodes guaranteed to have run before `key`: its chain of parents (graphs are trees). */
+function ancestorsOf(key: string, parent: Map<string, string>): Set<string> {
+  const ancestors = new Set<string>();
+  let current = parent.get(key);
+  while (current !== undefined && !ancestors.has(current)) {
+    ancestors.add(current);
+    current = parent.get(current);
+  }
+  return ancestors;
 }
 
 function reachableFrom(start: string, children: Map<string, string[]>): Set<string> {

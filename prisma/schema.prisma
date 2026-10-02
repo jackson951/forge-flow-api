@@ -27,6 +27,8 @@ enum IntegrationProviderKey {
   GITHUB
   MICROSOFT
   SLACK
+  /// Non-production webhook provider for end-to-end tests (Part 09); never enabled in production.
+  TEST
 }
 
 enum ConnectionStatus {

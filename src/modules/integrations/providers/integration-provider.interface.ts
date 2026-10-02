@@ -1,21 +1,38 @@
 import { IntegrationProviderKey } from '@prisma/client';
 
-export interface OAuthTokens {
-  accessToken: string;
-  refreshToken?: string;
-  expiresAt?: Date;
+/** What a provider learns when a connection is completed. Never contains secrets. */
+export interface ConnectionDetails {
+  /** Provider account id (GitHub installation id, Slack team id, Entra object id). */
+  externalAccountId: string;
+  accountLabel?: string;
   scopes: string[];
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+/** Thrown by providers when the user may not connect this account (shown as a generic error). */
+export class ConnectionDeniedError extends Error {
+  constructor(
+    readonly reason: 'denied' | 'not_authorized' | 'provider_error',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ConnectionDeniedError';
+  }
 }
 
 /**
- * Common contract that hides provider-specific APIs from the rest of the system.
- * GitHub, Microsoft Graph and Slack each implement this.
+ * Connection flow of one provider. The shared IntegrationsService owns `state` creation and
+ * single-use verification, membership checks, persistence and redirects; providers only
+ * build the authorize URL and complete the provider-specific exchange.
  */
 export interface IntegrationProvider {
   readonly key: IntegrationProviderKey;
-  buildAuthorizationUrl(state: string): string;
-  exchangeCode(code: string): Promise<OAuthTokens>;
-  refresh(refreshToken: string): Promise<OAuthTokens>;
+  /** URL segment of the callback: /api/v1/integrations/<slug>/callback */
+  readonly slug: string;
+  isConfigured(): boolean;
+  connectUrl(state: string): string;
+  /** Called with the callback query after `state` was verified and consumed. */
+  completeConnection(query: Record<string, string | undefined>): Promise<ConnectionDetails>;
 }
 
 export const INTEGRATION_PROVIDERS = Symbol('INTEGRATION_PROVIDERS');

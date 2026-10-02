@@ -7,7 +7,7 @@ import { join, relative } from 'node:path';
  * HTTP/controllers, feature modules, queues or provider SDKs. Nest wrappers live outside
  * these folders (engine.module.ts, executor/, conditions/, src/execution/).
  */
-const PURE_DIRS = ['execution', 'definition', 'validation', 'catalog'];
+const PURE_DIRS = ['execution', 'definition', 'validation', 'catalog', 'expressions'];
 const PURE_FILES = ['errors.ts'];
 const FORBIDDEN = [
   /from '@nestjs\//,

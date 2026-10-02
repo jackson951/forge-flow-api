@@ -1,20 +1,22 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
 import { IntegrationProviderKey } from '@prisma/client';
-import { IntegrationProvider, OAuthTokens } from './integration-provider.interface';
+import { ConnectionDetails, IntegrationProvider } from './integration-provider.interface';
 
+/** Microsoft connection — implemented in Part 14. Reports itself as not configured until then. */
 @Injectable()
 export class MicrosoftProvider implements IntegrationProvider {
   readonly key = IntegrationProviderKey.MICROSOFT;
+  readonly slug = 'microsoft';
 
-  buildAuthorizationUrl(_state: string): string {
+  isConfigured(): boolean {
+    return false;
+  }
+
+  connectUrl(): string {
     throw new NotImplementedException();
   }
 
-  exchangeCode(_code: string): Promise<OAuthTokens> {
-    throw new NotImplementedException();
-  }
-
-  refresh(_refreshToken: string): Promise<OAuthTokens> {
+  completeConnection(): Promise<ConnectionDetails> {
     throw new NotImplementedException();
   }
 }

@@ -1,5 +1,7 @@
 import { ErrorCategory } from '@prisma/client';
 import { PermanentError } from '../errors';
+import { conditionConfigSchema, evaluateCondition } from '../expressions/conditions';
+import { ReferenceSyntaxError } from '../expressions/reference';
 import { NodeHandler } from './node-handler';
 
 /** The trigger's output is the run's trigger input (manual input or normalised event). */
@@ -21,23 +23,33 @@ export const logHandler: NodeHandler<{ message: string }> = {
 };
 
 /**
- * Placeholder until the safe condition evaluator lands (Part 11). Fails clearly instead of
- * guessing a branch. The engine's branching itself is implemented and tested here.
+ * Evaluates the structured condition against the trigger output and earlier steps' outputs.
+ * Pure data evaluation (Part 11) — no code execution.
  */
-export const conditionPlaceholderHandler: NodeHandler = {
+export const conditionHandler: NodeHandler = {
   type: 'condition',
   kind: 'CONDITION',
   sideEffect: 'none',
-  execute: async () => {
-    throw new PermanentError(
-      ErrorCategory.VALIDATION,
-      'Condition evaluation is not available yet (Part 11)',
-    );
+  execute: async ({ config, triggerInput, outputs }) => {
+    const parsed = conditionConfigSchema.safeParse(config);
+    if (!parsed.success) {
+      throw new PermanentError(ErrorCategory.VALIDATION, 'Invalid condition configuration');
+    }
+    try {
+      return {
+        output: { result: evaluateCondition(parsed.data, { trigger: triggerInput, outputs }) },
+      };
+    } catch (err) {
+      if (err instanceof ReferenceSyntaxError) {
+        throw new PermanentError(ErrorCategory.VALIDATION, err.message);
+      }
+      throw err;
+    }
   },
 };
 
 export const BUILT_IN_HANDLERS: NodeHandler[] = [
   manualTriggerHandler,
   logHandler as NodeHandler,
-  conditionPlaceholderHandler,
+  conditionHandler,
 ];

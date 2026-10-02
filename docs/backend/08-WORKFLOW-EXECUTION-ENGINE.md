@@ -168,6 +168,6 @@ Also covered by unit tests: unknown errors become INTERNAL with a generic stored
 
 ### Limitations
 
-- **The built-in `condition` node fails at runtime** with VALIDATION "Condition evaluation is not available yet (Part 11)". Branching itself is implemented and tested through test-only condition handlers; the safe evaluator and reference resolver are Part 11.
+- ~~The built-in `condition` node fails at runtime until Part 11.~~ Resolved in Part 11 (real condition handler and expression resolver).
 - On resume, earlier steps' outputs are the *stored* (sanitised) versions, so a credential-like key in an output arrives as `[REDACTED]` to later steps after a retry. Handlers must not pass secrets through outputs (Part 17).
 - Step log lines carry `runId` and `nodeKey`; adding `correlationId` and `stepRunId` to every step line is Part 16.

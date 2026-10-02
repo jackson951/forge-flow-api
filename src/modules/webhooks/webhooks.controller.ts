@@ -1,37 +1,44 @@
+import { Body, Controller, HttpStatus, Param, Post, Req, Res } from '@nestjs/common';
 import {
-  Body,
-  Controller,
-  Headers,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseEnumPipe,
-  Post,
-  RawBodyRequest,
-  Req,
-} from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+  ApiAcceptedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiPayloadTooLargeResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IntegrationProviderKey } from '@prisma/client';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { Public } from '../../common/decorators';
-import { WebhooksService } from './webhooks.service';
+import { IntakeResult, WebhookIntakeService } from './webhook-intake.service';
+
+type RawRequest = Request & { rawBody?: Buffer; id?: string };
 
 @ApiTags('Webhooks')
-@Public() // authenticated by provider signature, not bearer token
+@Public() // authenticated by provider signature, not a bearer token
 @Controller('webhooks')
 export class WebhooksController {
-  constructor(private readonly webhooks: WebhooksService) {}
+  constructor(private readonly intake: WebhookIntakeService) {}
 
-  @Throttle({ default: { limit: 120, ttl: 60_000 } })
-  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 600, ttl: 60_000 } })
+  @ApiAcceptedResponse({ description: '{ accepted, duplicate: false, deliveryId, runs }' })
+  @ApiOkResponse({ description: 'Duplicate delivery: { accepted, duplicate: true, deliveryId }' })
+  @ApiUnauthorizedResponse({ description: 'Invalid signature or outside the replay window' })
+  @ApiNotFoundResponse({ description: 'Unknown or disabled provider' })
+  @ApiPayloadTooLargeResponse()
   @Post(':provider')
-  receive(
-    @Param('provider', new ParseEnumPipe(IntegrationProviderKey)) provider: IntegrationProviderKey,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Req() req: RawBodyRequest<Request>,
+  async receive(
+    @Param('provider') provider: string,
+    @Req() req: RawRequest,
     @Body() body: unknown,
-  ) {
-    return this.webhooks.receive({ provider, headers, rawBody: req.rawBody, body });
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<IntakeResult> {
+    const result = await this.intake.receive(
+      provider,
+      { headers: req.headers, rawBody: req.rawBody ?? Buffer.alloc(0), body },
+      req.id,
+    );
+    res.status(result.duplicate ? HttpStatus.OK : HttpStatus.ACCEPTED);
+    return result;
   }
 }
