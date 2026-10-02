@@ -1,4 +1,11 @@
-import { Global, Inject, Logger, Module, OnApplicationShutdown } from '@nestjs/common';
+import {
+  Global,
+  Inject,
+  Logger,
+  Module,
+  OnApplicationShutdown,
+  OnModuleInit,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { AppConfigService } from '../../config/app-config.service';
 
@@ -6,6 +13,7 @@ import { AppConfigService } from '../../config/app-config.service';
 export const REDIS_CLIENT = Symbol('REDIS_CLIENT');
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
+const STARTUP_WAIT_MS = 5_000;
 
 @Global()
 @Module({
@@ -31,8 +39,27 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
   ],
   exports: [REDIS_CLIENT],
 })
-export class RedisModule implements OnApplicationShutdown {
+export class RedisModule implements OnModuleInit, OnApplicationShutdown {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+
+  /**
+   * Gives the first connection a moment before the app starts serving, so requests right
+   * after startup find Redis ready. Never fatal: if Redis is down the app still starts,
+   * readiness reports it, and Redis-backed features degrade as documented.
+   */
+  async onModuleInit(): Promise<void> {
+    if (this.redis.status === 'ready') return;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.redis.off('ready', done);
+        resolve();
+      };
+      const timer = setTimeout(done, STARTUP_WAIT_MS);
+      timer.unref();
+      this.redis.once('ready', done);
+    });
+  }
 
   /** Resolves once the socket is closed, not merely when QUIT is acknowledged. */
   async onApplicationShutdown(): Promise<void> {

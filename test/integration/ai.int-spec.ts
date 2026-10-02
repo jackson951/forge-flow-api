@@ -1,7 +1,6 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { TestingModule } from '@nestjs/testing';
 import { RunStatus, StepRun } from '@prisma/client';
-import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from '../../src/engine/catalog/node-type-catalog';
@@ -10,6 +9,7 @@ import { RunQueue } from '../../src/infrastructure/queue/run-queue.service';
 import { aiNodeTypes } from '../../src/modules/ai/ai.node-types';
 import { GITHUB_NODE_TYPES } from '../../src/modules/integrations/github/github.node-types';
 import { bearer, registerUser, RegisteredUser } from '../support/auth';
+import { captureLogs } from '../support/canaries';
 import { createTestApp } from '../support/create-app';
 import { createTestWorker, waitFor } from '../support/create-worker';
 import { truncateAll } from '../support/test-database';
@@ -109,7 +109,7 @@ describe('AI steps (integration, fake provider)', () => {
   let worker: TestingModule;
   let user: RegisteredUser;
   let ws: string;
-  const logged: unknown[] = [];
+  const logged: unknown[][] = [];
   const responses: unknown[] = [];
 
   const auth = () => bearer(user.accessToken);
@@ -154,16 +154,7 @@ describe('AI steps (integration, fake provider)', () => {
 
   beforeAll(async () => {
     // Every structured log call made by the API and the worker during this suite.
-    for (const level of ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const) {
-      const original = PinoLogger.prototype[level];
-      jest.spyOn(PinoLogger.prototype, level).mockImplementation(function (
-        this: PinoLogger,
-        ...args: unknown[]
-      ) {
-        logged.push(args);
-        return (original as (...a: unknown[]) => void).apply(this, args);
-      });
-    }
+    captureLogs(logged);
     api = await createTestApp();
     server = api.getHttpServer();
     prisma = api.get(PrismaService);

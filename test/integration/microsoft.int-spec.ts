@@ -1,7 +1,6 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { TestingModule, TestingModuleBuilder } from '@nestjs/testing';
 import { RunStatus, StepRun } from '@prisma/client';
-import { PinoLogger } from 'nestjs-pino';
 import request, { Response } from 'supertest';
 import { App } from 'supertest/types';
 import { AppConfigService } from '../../src/config/app-config.service';
@@ -11,6 +10,7 @@ import { RunQueue } from '../../src/infrastructure/queue/run-queue.service';
 import { CredentialStore } from '../../src/modules/integrations/credentials/credential-store';
 import { MicrosoftTokenManager } from '../../src/modules/integrations/microsoft/microsoft-token-manager';
 import { bearer, registerUser, RegisteredUser } from '../support/auth';
+import { captureLogs } from '../support/canaries';
 import { createTestApp } from '../support/create-app';
 import { createTestWorker, waitFor } from '../support/create-worker';
 import { FakeMicrosoft } from '../support/fake-microsoft';
@@ -45,7 +45,7 @@ describe('Microsoft Graph integration (integration)', () => {
   let connectionId: string;
   let workflowId: string;
   const responses: string[] = [];
-  const logged: unknown[] = [];
+  const logged: unknown[][] = [];
 
   const track = (res: Response) => {
     responses.push(JSON.stringify(res.headers) + res.text);
@@ -148,16 +148,7 @@ describe('Microsoft Graph integration (integration)', () => {
     (await prisma.integrationConnection.findUniqueOrThrow({ where: { id: connectionId } })).status;
 
   beforeAll(async () => {
-    for (const level of ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const) {
-      const original = PinoLogger.prototype[level];
-      jest.spyOn(PinoLogger.prototype, level).mockImplementation(function (
-        this: PinoLogger,
-        ...args: unknown[]
-      ) {
-        logged.push(args);
-        return (original as (...a: unknown[]) => void).apply(this, args);
-      });
-    }
+    captureLogs(logged);
     await fake.start();
     const useFakes = (b: TestingModuleBuilder) =>
       b.overrideProvider(AppConfigService).useClass(MicrosoftTestConfig);

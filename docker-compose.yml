@@ -1,148 +1,138 @@
+# Development infrastructure:  docker compose up -d postgres redis
+# Full stack (one image):       docker compose --profile full up --build
+#   migrate (one-shot) → api + worker. See README "Running with Docker".
+
+# Shared by api and worker: one image, two commands (Part 20, FR-20.3).
+x-app: &app
+  image: flowforge-api:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  restart: unless-stopped
+  # PID 1 is tini: forwards SIGTERM to Node so shutdown hooks run.
+  init: true
+  stop_grace_period: 30s
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    NODE_ENV: production
+    # Inside Docker, use service names rather than localhost.
+    DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://flowforge:flowforge@postgres:5432/flowforge?schema=public}
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    # The fake AI provider is refused in production; set AI_PROVIDER_DOCKER=anthropic (with a
+    # key in .env) to enable AI steps in the container stack.
+    AI_PROVIDER: ${AI_PROVIDER_DOCKER:-}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  networks:
+    - flowforge-network
+  profiles:
+    - full
+
 services:
   postgres:
     image: postgres:17-alpine
     container_name: flowforge-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-flowforge}
       # Local development only. Never reuse this default outside your machine.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flowforge}
       POSTGRES_DB: ${POSTGRES_DB:-flowforge}
-
     ports:
-      # Windows already has PostgreSQL on 5432.
-      # Host 5433 -> container 5432.
+      # Host 5433 -> container 5432 (5432 is often taken by a local PostgreSQL).
       # Bound to localhost so the dev database is not exposed on the network.
       - "127.0.0.1:5433:5432"
-
     volumes:
       - pgdata:/var/lib/postgresql/data
-
+      # Creates the test database on first start (fresh volume only).
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-test-database.sql:ro
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-flowforge} -d ${POSTGRES_DB:-flowforge}"
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flowforge} -d ${POSTGRES_DB:-flowforge}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
-
     networks:
       - flowforge-network
-
 
   redis:
     image: redis:7-alpine
     container_name: flowforge-redis
     restart: unless-stopped
-
     ports:
       - "127.0.0.1:6379:6379"
-
-    command:
-      - redis-server
-      - --appendonly
-      - "yes"
-
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
-
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 5s
-
     networks:
       - flowforge-network
 
+  # One-shot: applies pending migrations, then exits; api and worker wait for it.
+  migrate:
+    image: flowforge-migrate:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    container_name: flowforge-migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://flowforge:flowforge@postgres:5432/flowforge?schema=public}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - flowforge-network
+    profiles:
+      - full
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
+    <<: *app
     container_name: flowforge-api
-    restart: unless-stopped
-
-    env_file:
-      - .env
-
-    environment:
-      NODE_ENV: production
-
-      # IMPORTANT:
-      # Inside Docker, use service names rather than localhost.
-      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://flowforge:flowforge@postgres:5432/flowforge?schema=public}
-
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-
+    command: ["node", "dist/main.js"]
     ports:
-      - "3000:3000"
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-      redis:
-        condition: service_healthy
-
-    networks:
-      - flowforge-network
-
-    profiles:
-      - full
-
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
+    <<: *app
     container_name: flowforge-worker
-    restart: unless-stopped
-
-    command:
-      - node
-      - dist/worker.js
-
-    env_file:
-      - .env
-
+    command: ["node", "dist/worker.js"]
     environment:
-      NODE_ENV: production
-
-      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://flowforge:flowforge@postgres:5432/flowforge?schema=public}
-
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-      redis:
-        condition: service_healthy
-
-    networks:
-      - flowforge-network
-
-    profiles:
-      - full
-
+      <<: *app-env
+      WORKER_HEARTBEAT_FILE: /tmp/flowforge-worker.heartbeat
+    healthcheck:
+      # Healthy while the heartbeat file is younger than a minute.
+      test: ["CMD-SHELL", "find /tmp/flowforge-worker.heartbeat -mmin -1 | grep -q ."]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 volumes:
   pgdata:
     name: flowforge-pgdata
-
   redisdata:
     name: flowforge-redisdata
-
 
 networks:
   flowforge-network:

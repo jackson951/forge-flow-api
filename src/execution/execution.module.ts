@@ -22,6 +22,7 @@ import { PrismaRunStore } from './prisma-run-store';
 import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
 import { RunWorkerService } from './run-worker.service';
 import { WorkerConnections } from './worker-connections';
+import { WorkerHeartbeat } from './worker-heartbeat.service';
 
 /** Worker-only: the engine, its handlers and the queue processors. */
 @Module({
@@ -86,6 +87,7 @@ import { WorkerConnections } from './worker-connections';
     RunSweeper,
     WorkflowRunProcessor,
     MaintenanceProcessor,
+    WorkerHeartbeat,
   ],
   exports: [NodeHandlerRegistry, RunSweeper, RunWorkerService],
 })
