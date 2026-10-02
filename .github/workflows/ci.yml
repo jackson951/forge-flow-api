@@ -45,16 +45,32 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      # Part 18: fail on high/critical advisories (exceptions are documented in docs/backend/18-*).
-      - run: npm audit --audit-level=high
-      - run: npx prisma generate
-      - run: npx prisma validate
-      - run: npx prettier --check "src/**/*.ts" "test/**/*.ts"
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npx prisma migrate deploy
-      - run: npm run test:e2e
-      - run: npm run test:int
-      - run: npm run build
+      # Quality gate (docs/backend/19-TESTING-AND-QUALITY-GATE.md). Every step must pass.
+      - name: 1. Install
+        run: npm ci
+      - name: 2. Prisma schema and migrations on a fresh database
+        run: |
+          npx prisma generate
+          npx prisma validate
+          npx prisma migrate deploy
+      - name: 3. Format, lint, typecheck
+        run: |
+          npx prettier --check "src/**/*.ts" "test/**/*.ts"
+          npm run lint
+          npm run typecheck
+          npx tsc --noEmit -p tsconfig.spec.json
+      - name: 4. Unit tests + per-area coverage thresholds
+        run: npm run test:cov
+      - name: 5-6. Unit, integration and E2E suites together + global coverage floor
+        run: npm run test:all
+      - name: 7. Build
+        run: npm run build
+      - name: 8. Dependency audit (high and critical)
+        run: npm audit --audit-level=high
+      - name: Coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
