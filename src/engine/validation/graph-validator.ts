@@ -14,6 +14,7 @@ export type IssueCode =
   | 'MULTIPLE_TRIGGERS'
   | 'DUPLICATE_NODE_KEY'
   | 'UNKNOWN_NODE_TYPE'
+  | 'PROVIDER_NOT_CONFIGURED'
   | 'INVALID_NODE_CONFIG'
   | 'SECRET_IN_CONFIG'
   | 'EDGE_UNKNOWN_NODE'
@@ -136,6 +137,13 @@ export function validateDefinition(
           : `Unknown node type "${node.type}"`,
       });
       continue;
+    }
+    if (type.unavailableReason) {
+      error({
+        code: 'PROVIDER_NOT_CONFIGURED',
+        nodeKey: node.key,
+        message: type.unavailableReason,
+      });
     }
     const config = type.configSchema.safeParse(node.config);
     if (!config.success) {

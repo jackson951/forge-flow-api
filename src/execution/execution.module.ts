@@ -8,6 +8,9 @@ import { ExecutionEngine } from '../engine/execution/execution-engine';
 import { createExpressionResolver } from '../engine/expressions/expression-resolver';
 import { NodeHandlerRegistry } from '../engine/execution/handler-registry';
 import { NODE_HANDLERS, NodeHandler } from '../engine/execution/node-handler';
+import { AI_PROVIDER, AiProvider } from '../modules/ai/ai-provider';
+import { AiModule } from '../modules/ai/ai.module';
+import { createAiHandlers } from '../modules/ai/ai.node-types';
 import { GITHUB_HANDLERS } from '../modules/integrations/github/github.node-types';
 import { PrismaRunStore } from './prisma-run-store';
 import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
@@ -15,10 +18,18 @@ import { RunWorkerService } from './run-worker.service';
 
 /** Worker-only: the engine, its handlers and the queue processors. */
 @Module({
-  imports: [EngineModule],
+  imports: [EngineModule, AiModule],
   providers: [
     PrismaRunStore,
-    { provide: NODE_HANDLERS, useValue: [...BUILT_IN_HANDLERS, ...GITHUB_HANDLERS] },
+    {
+      provide: NODE_HANDLERS,
+      inject: [AI_PROVIDER, AppConfigService],
+      useFactory: (ai: AiProvider | null, config: AppConfigService): NodeHandler[] => [
+        ...BUILT_IN_HANDLERS,
+        ...GITHUB_HANDLERS,
+        ...createAiHandlers(ai, config.ai),
+      ],
+    },
     {
       provide: NodeHandlerRegistry,
       inject: [NODE_HANDLERS],

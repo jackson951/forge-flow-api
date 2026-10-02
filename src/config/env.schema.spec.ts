@@ -36,6 +36,39 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...base, THROTTLE_ENABLED: 'false' }).THROTTLE_ENABLED).toBe(false);
   });
 
+  describe('AI provider', () => {
+    it('is disabled by default and treats empty values as unset', () => {
+      const env = validateEnv({ ...base, AI_PROVIDER: '', AI_MODEL: '' });
+      expect(env.AI_PROVIDER).toBeUndefined();
+      expect(env.AI_MODEL).toBe('claude-haiku-4-5-20251001');
+      expect(env.AI_MAX_INPUT_CHARS).toBe(20_000);
+    });
+
+    it('requires an API key for the hosted provider', () => {
+      expect(() => validateEnv({ ...base, AI_PROVIDER: 'anthropic' })).toThrow(
+        /AI_API_KEY: required when AI_PROVIDER is "anthropic"/,
+      );
+      expect(validateEnv({ ...base, AI_PROVIDER: 'anthropic', AI_API_KEY: 'k' }).AI_PROVIDER).toBe(
+        'anthropic',
+      );
+      expect(() => validateEnv({ ...base, AI_PROVIDER: 'openai' })).toThrow(/AI_PROVIDER/);
+    });
+
+    it('allows the fake provider outside production only', () => {
+      expect(validateEnv({ ...base, AI_PROVIDER: 'fake' }).AI_PROVIDER).toBe('fake');
+      expect(() =>
+        validateEnv({
+          ...base,
+          NODE_ENV: 'production',
+          JWT_ACCESS_SECRET: 'p'.repeat(40),
+          JWT_REFRESH_SECRET: 'q'.repeat(40),
+          CORS_ORIGINS: 'https://app.example.com',
+          AI_PROVIDER: 'fake',
+        }),
+      ).toThrow(/AI_PROVIDER: the fake AI provider is not allowed in production/);
+    });
+  });
+
   describe('encryption keys', () => {
     const key = Buffer.alloc(32, 7).toString('base64');
 
