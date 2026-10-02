@@ -17,7 +17,7 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 07 | [Queue and Worker Infrastructure](07-QUEUE-AND-WORKER-INFRASTRUCTURE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #7, `main`) |
 | 08 | [Workflow Execution Engine](08-WORKFLOW-EXECUTION-ENGINE.md) | COMPLETE | All 8 acceptance criteria verified 2026-10-01; CI green on GitHub (PR #7, `main`). Condition placeholder replaced in Part 11 |
 | 09 | [Webhook Platform](09-WEBHOOK-PLATFORM.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-01; signed intake, unique-delivery dedup (10 concurrent copies → 1 run), test provider. Not yet pushed/CI-verified |
-| 10 | [GitHub Integration](10-GITHUB-INTEGRATION.md) | BLOCKED | Implemented; AC-10.2–10.6 verified 2026-10-02 (fake GitHub, mutation-checked isolation, log scan). **Blocked on AC-10.1:** needs a registered GitHub App for a real github.com event — setup guide in the spec |
+| 10 | [GitHub Integration](10-GITHUB-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified; AC-10.1 with real github.com events 2026-10-02 (issue #12 → run SUCCEEDED, label branch and mapped message). Fixed OAuth `code`/`state` in request logs. Not yet pushed/CI-verified |
 | 11 | [Conditions and Data Mapping](11-CONDITIONS-AND-DATA-MAPPING.md) | COMPLETE | All 5 acceptance criteria verified 2026-10-01; nested AND/OR/NOT, 13 operators, templates; no code execution. Not yet pushed/CI-verified |
 | 12 | [AI Integration](12-AI-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-02; Anthropic provider + deterministic fake, summarize/classify/extract with zod validation and one repair, worker-only, external HTTP blocked in tests. Not yet pushed/CI-verified |
 | 13 | [Slack Integration](13-SLACK-INTEGRATION.md) | NOT STARTED | Provider stub |
@@ -246,3 +246,4 @@ flowchart TD
 | 2026-10-02 | Part 10 implemented; all criteria verified except a real github.com event → BLOCKED until a GitHub App is registered. Added publish-time connection check (cross-workspace connection ids). Next: Part 12 (or 17 for credential encryption before Slack). |
 | 2026-10-02 | Parts 09–11 CI green on GitHub (PR #8). Part 17 implemented and verified → COMPLETE (pulled forward before Slack). Next: Part 12 (AI) or 13 (Slack). |
 | 2026-10-02 | Part 17 CI green (PR #9). Part 12 implemented and verified → COMPLETE. AI `text` also accepts `{ ref }` because Part 11 caps templates at 16 KB. Next: Part 13 (Slack). |
+| 2026-10-02 | Part 12 merged (PR #10). Part 10 verified with the real GitHub App → COMPLETE; request logs now redact OAuth `code`/`state`. Next: Part 13 (Slack). |

@@ -3,7 +3,7 @@ import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import { Options } from 'pino-http';
 import { REQUEST_ID_HEADER } from '../../common/constants';
 import { redactSecrets } from '../../common/security/redaction';
-import { REDACTED_PATHS } from '../../common/utils/redact';
+import { REDACTED_PATHS, redactQuery, redactQueryString } from '../../common/utils/redact';
 import { resolveRequestId } from '../../common/utils/request-id';
 import { AppConfigService } from '../../config/app-config.service';
 
@@ -17,6 +17,14 @@ export function buildLoggerOptions(config: AppConfigService): Options {
     level: config.get('LOG_LEVEL'),
     redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
     formatters: { log: (object: Record<string, unknown>) => redactSecrets(object) },
+    // OAuth callbacks carry one-time secrets in the query string (`code`, `state`).
+    serializers: {
+      req: (req: { url?: string; query?: unknown }) => {
+        if (req.url) req.url = redactQueryString(req.url);
+        if (req.query) req.query = redactQuery(req.query);
+        return req;
+      },
+    },
     genReqId: (req, res) => {
       const id = resolveRequestId(req.headers[REQUEST_ID_HEADER]);
       res.setHeader(REQUEST_ID_HEADER, id);
