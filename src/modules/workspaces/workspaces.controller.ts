@@ -6,6 +6,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { CurrentUser, CurrentWorkspace, RequireRole } from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
@@ -21,6 +22,7 @@ export class WorkspacesController {
 
   @ApiCreatedResponse({ type: WorkspaceResponseDto })
   @Post()
+  @ApiOperation({ summary: 'Create a workspace (the caller becomes OWNER)' })
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateWorkspaceDto,
@@ -30,6 +32,7 @@ export class WorkspacesController {
 
   @ApiOkResponse({ type: [WorkspaceResponseDto] })
   @Get()
+  @ApiOperation({ summary: "Workspaces the caller is a member of, with the caller's role" })
   list(@CurrentUser() user: AuthenticatedUser): Promise<WorkspaceResponseDto[]> {
     return this.workspaces.listForUser(user.userId);
   }
@@ -37,6 +40,7 @@ export class WorkspacesController {
   @ApiOkResponse({ type: WorkspaceResponseDto })
   @ApiNotFoundResponse({ description: 'Not a member (or no such workspace)' })
   @Get(':workspaceId')
+  @ApiOperation({ summary: 'One workspace (members only)' })
   get(@CurrentWorkspace() access: WorkspaceAccess): Promise<WorkspaceResponseDto> {
     return this.workspaces.get(access);
   }
@@ -45,6 +49,7 @@ export class WorkspacesController {
   @ApiOkResponse({ type: WorkspaceResponseDto })
   @ApiForbiddenResponse()
   @Patch(':workspaceId')
+  @ApiOperation({ summary: 'Rename a workspace (ADMIN)' })
   rename(
     @CurrentWorkspace() access: WorkspaceAccess,
     @Body() dto: UpdateWorkspaceDto,
@@ -56,6 +61,7 @@ export class WorkspacesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiForbiddenResponse()
   @Delete(':workspaceId')
+  @ApiOperation({ summary: 'Delete a workspace and everything in it (OWNER)' })
   delete(@CurrentWorkspace() access: WorkspaceAccess): Promise<void> {
     return this.workspaces.delete(access);
   }

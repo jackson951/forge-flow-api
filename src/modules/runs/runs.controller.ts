@@ -13,7 +13,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CurrentWorkspace, RequireRole } from '../../common/decorators';
 import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
 import { ListRunsQueryDto } from './dto/list-runs-query.dto';
@@ -32,17 +32,20 @@ export class RunsController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: 'Run history (filters, keyset-paginated, newest first)' })
   list(@CurrentWorkspace() ws: WorkspaceAccess, @Query() query: ListRunsQueryDto) {
     return this.runs.list(ws.workspaceId, query);
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'One run with its failed step and retry links' })
   get(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.runs.get(ws.workspaceId, id);
   }
 
   /** Steps in execution order, with sanitised input/output and errors. */
   @Get(':id/steps')
+  @ApiOperation({ summary: 'Steps in execution order, with sanitised input/output and errors' })
   steps(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.runs.steps(ws.workspaceId, id);
   }
@@ -50,6 +53,10 @@ export class RunsController {
   @RequireRole('ADMIN')
   @HttpCode(HttpStatus.ACCEPTED)
   @Post(':id/retry')
+  @ApiOperation({
+    summary:
+      'Retry a FAILED run on the same version (ADMIN); uncertain outcomes need acknowledgement',
+  })
   retry(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -74,6 +81,7 @@ export class RunsController {
   @RequireRole('ADMIN')
   @HttpCode(HttpStatus.OK)
   @Post(':id/cancel')
+  @ApiOperation({ summary: 'Cancel a QUEUED or RUNNING run (ADMIN)' })
   cancel(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.runs.cancel(ws, id);
   }

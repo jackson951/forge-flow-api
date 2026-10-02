@@ -20,6 +20,7 @@ import {
   ApiNotFoundResponse,
   ApiTags,
   ApiUnprocessableEntityResponse,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { CurrentWorkspace, RequireRole } from '../../common/decorators';
 import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
@@ -45,21 +46,27 @@ export class WorkflowsController {
   ) {}
 
   @Get()
+  @ApiOperation({
+    summary: 'Workflows of the workspace (keyset-paginated, archived hidden by default)',
+  })
   list(@CurrentWorkspace() ws: WorkspaceAccess, @Query() query: ListWorkflowsQueryDto) {
     return this.workflows.list(ws.workspaceId, query);
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'One workflow with its current draft' })
   get(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.workflows.get(ws.workspaceId, id);
   }
 
   @Post()
+  @ApiOperation({ summary: 'Create a workflow with an empty draft' })
   create(@CurrentWorkspace() ws: WorkspaceAccess, @Body() dto: CreateWorkflowDto) {
     return this.workflows.create(ws.workspaceId, ws.userId, dto);
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Rename or describe a workflow' })
   update(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -71,6 +78,10 @@ export class WorkflowsController {
   @ApiBadRequestResponse({ description: 'Malformed definition or size limit exceeded' })
   @ApiConflictResponse({ description: 'Stale expectedRevision, or workflow archived' })
   @Put(':id/draft')
+  @ApiOperation({
+    summary:
+      'Save the draft (optimistic concurrency via expectedRevision); returns validation issues',
+  })
   saveDraft(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -81,6 +92,7 @@ export class WorkflowsController {
 
   @HttpCode(HttpStatus.OK)
   @Post(':id/validate')
+  @ApiOperation({ summary: 'Validate the draft without saving' })
   validate(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -94,6 +106,9 @@ export class WorkflowsController {
   @ApiUnprocessableEntityResponse({ description: 'The draft has validation errors' })
   @ApiConflictResponse({ description: 'Stale revision, archived, or nothing changed' })
   @Post(':id/publish')
+  @ApiOperation({
+    summary: 'Publish the reviewed draft as the next immutable version and activate it (ADMIN)',
+  })
   publish(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -103,6 +118,7 @@ export class WorkflowsController {
   }
 
   @Get(':id/versions')
+  @ApiOperation({ summary: 'Published versions, newest first (keyset-paginated)' })
   versions(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -113,6 +129,7 @@ export class WorkflowsController {
 
   /** Versions are read-only: there is deliberately no update or delete route. */
   @Get(':id/versions/:version')
+  @ApiOperation({ summary: 'One published version (read-only)' })
   version(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('id', ParseUUIDPipe) id: string,
@@ -122,6 +139,7 @@ export class WorkflowsController {
   }
 
   @Post(':id/duplicate')
+  @ApiOperation({ summary: 'Copy a workflow as a new draft' })
   duplicate(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.workflows.duplicate(ws.workspaceId, ws.userId, id);
   }
@@ -129,6 +147,7 @@ export class WorkflowsController {
   @RequireRole('ADMIN')
   @HttpCode(HttpStatus.OK)
   @Post(':id/archive')
+  @ApiOperation({ summary: 'Archive (ADMIN): stops triggers; history is kept' })
   archive(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.workflows.archive(ws.workspaceId, ws.userId, id);
   }
@@ -136,6 +155,10 @@ export class WorkflowsController {
   @RequireRole('ADMIN')
   @HttpCode(HttpStatus.OK)
   @Post(':id/unarchive')
+  @ApiOperation({
+    summary:
+      'Unarchive (ADMIN): back to PUBLISHED with its active version, or DRAFT if never published',
+  })
   unarchive(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.workflows.unarchive(ws.workspaceId, ws.userId, id);
   }
@@ -144,6 +167,7 @@ export class WorkflowsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiConflictResponse({ description: 'Workflow has run history; archive it instead' })
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete a workflow that has never run (ADMIN; otherwise archive it)' })
   remove(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.workflows.remove(ws.workspaceId, ws.userId, id);
   }

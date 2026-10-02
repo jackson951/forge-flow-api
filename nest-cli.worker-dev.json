@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "entryFile": "worker",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "tsConfigPath": "tsconfig.worker-dev.json",
+    "plugins": [{ "name": "@nestjs/swagger", "options": { "introspectComments": true } }]
+  }
+}

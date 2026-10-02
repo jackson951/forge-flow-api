@@ -44,7 +44,12 @@ CMD ["npx", "prisma", "migrate", "deploy"]
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN addgroup -S app && adduser -S app -G app
+# The app runs `node dist/...` only. The base image's bundled npm/yarn are unused here and
+# carried every HIGH finding of the image scan (Part 22), so they are removed.
+RUN addgroup -S app && adduser -S app -G app \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+     /usr/local/bin/corepack /usr/local/lib/node_modules/corepack /opt/yarn-* \
+     /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=prod-deps --chown=app:app /app/node_modules ./node_modules
 # The generated client and its query engine for this platform.
 COPY --from=build --chown=app:app /app/node_modules/.prisma ./node_modules/.prisma

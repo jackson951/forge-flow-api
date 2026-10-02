@@ -16,6 +16,7 @@ import {
   ApiFoundResponse,
   ApiServiceUnavailableResponse,
   ApiTags,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { IntegrationProviderKey } from '@prisma/client';
 import { Response } from 'express';
@@ -34,6 +35,7 @@ export class IntegrationsController {
   constructor(private readonly integrations: IntegrationsService) {}
 
   @Get()
+  @ApiOperation({ summary: 'Connected integration accounts of the workspace (no secrets)' })
   connections(@CurrentWorkspace() ws: WorkspaceAccess) {
     return this.integrations.listConnections(ws.workspaceId);
   }
@@ -42,6 +44,9 @@ export class IntegrationsController {
   @RequireRole('ADMIN')
   @ApiServiceUnavailableResponse({ description: 'Provider not configured on this server' })
   @Post(':provider/connect')
+  @ApiOperation({
+    summary: 'Start connecting a provider: returns the URL to send the browser to (ADMIN)',
+  })
   connect(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('provider', providerPipe) provider: IntegrationProviderKey,
@@ -51,6 +56,7 @@ export class IntegrationsController {
 
   /** Repositories the GitHub App installation can access (for trigger configuration). */
   @Get(':connectionId/github/repositories')
+  @ApiOperation({ summary: 'Repositories the GitHub App installation can access' })
   repositories(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('connectionId', ParseUUIDPipe) connectionId: string,
@@ -60,6 +66,7 @@ export class IntegrationsController {
 
   /** Slack channels the bot can post to (for action configuration). IDs and names only. */
   @Get(':connectionId/slack/channels')
+  @ApiOperation({ summary: 'Slack channels the bot can post to (ids and names only)' })
   slackChannels(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('connectionId', ParseUUIDPipe) connectionId: string,
@@ -75,6 +82,7 @@ export class IntegrationsController {
 
   /** Microsoft To Do lists of the connecting user (for action configuration). */
   @Get(':connectionId/microsoft/todo-lists')
+  @ApiOperation({ summary: 'Microsoft To Do lists of the connected account' })
   todoLists(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('connectionId', ParseUUIDPipe) connectionId: string,
@@ -85,6 +93,9 @@ export class IntegrationsController {
   @RequireRole('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':connectionId')
+  @ApiOperation({
+    summary: 'Disconnect an integration (revokes provider tokens where supported) (ADMIN)',
+  })
   disconnect(
     @CurrentWorkspace() ws: WorkspaceAccess,
     @Param('connectionId', ParseUUIDPipe) connectionId: string,
@@ -101,6 +112,9 @@ export class IntegrationProvidersController {
 
   @ApiBearerAuth()
   @Get('providers')
+  @ApiOperation({
+    summary: 'Integration providers and whether this deployment has them configured',
+  })
   providers() {
     return this.integrations.listProviders();
   }
@@ -112,6 +126,9 @@ export class IntegrationProvidersController {
   @Public()
   @ApiFoundResponse({ description: 'Redirect to FRONTEND_URL/integrations?provider=…&status=…' })
   @Get(':provider/callback')
+  @ApiOperation({
+    summary: 'OAuth / installation redirect target (authenticated by the single-use state)',
+  })
   async callback(
     @Param('provider') provider: string,
     @Query() query: Record<string, unknown>,

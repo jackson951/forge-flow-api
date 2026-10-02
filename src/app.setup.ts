@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { json, NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { REQUEST_ID_HEADER } from './common/constants';
+import { withStandardResponses } from './common/http/api-docs';
 import { bodyParserErrorMapper } from './common/http/body-parser-errors';
 import { AppConfigService } from './config/app-config.service';
 
@@ -88,6 +89,10 @@ export function configureApp(app: NestExpressApplication): void {
       .setVersion('0.1.0')
       .addBearerAuth()
       .build();
-    SwaggerModule.setup(`${prefix}/docs`, app, SwaggerModule.createDocument(app, doc));
+    SwaggerModule.setup(
+      `${prefix}/docs`,
+      app,
+      withStandardResponses(SwaggerModule.createDocument(app, doc)),
+    );
   }
 }
