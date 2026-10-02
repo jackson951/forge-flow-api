@@ -14,6 +14,7 @@ const ALLOWED_CREDENTIAL_IMPORTERS = new Set([
   'scripts/reencrypt-credentials.ts',
   'execution/execution.module.ts', // worker DI only
   'execution/worker-connections.ts', // decrypts for node handlers, scoped to the run's workspace
+  'modules/integrations/microsoft/microsoft-token-manager.ts', // refresh + rotation, workspace-scoped
 ]);
 
 function tsFiles(dir: string): string[] {

@@ -54,8 +54,12 @@ export class CredentialStore {
     });
   }
 
-  async get(workspaceId: string, connectionId: string): Promise<DecryptedConnection | null> {
-    const connection = await this.prisma.integrationConnection.findFirst({
+  async get(
+    workspaceId: string,
+    connectionId: string,
+    tx: Prisma.TransactionClient = this.prisma,
+  ): Promise<DecryptedConnection | null> {
+    const connection = await tx.integrationConnection.findFirst({
       where: { id: connectionId, workspaceId },
       select: {
         id: true,
@@ -82,6 +86,23 @@ export class CredentialStore {
       refreshToken: this.open(connection.id, 'refreshToken', c?.encryptedRefreshToken),
       accessTokenExpiresAt: c?.accessTokenExpiresAt ?? null,
     };
+  }
+
+  /**
+   * Like `get`, inside `tx` and holding a row lock on the credential until the transaction
+   * ends: serialises token refreshes for one connection across processes (Part 14).
+   */
+  async getLocked(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    connectionId: string,
+  ): Promise<DecryptedConnection | null> {
+    await tx.$queryRaw`
+      SELECT c.id FROM "IntegrationCredential" c
+      JOIN "IntegrationConnection" ic ON ic.id = c."connectionId"
+      WHERE c."connectionId" = ${connectionId}::uuid AND ic."workspaceId" = ${workspaceId}::uuid
+      FOR UPDATE OF c`;
+    return this.get(workspaceId, connectionId, tx);
   }
 
   /**
