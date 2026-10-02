@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { UnrecoverableError } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { hostname } from 'node:os';
-import { classifyError } from '../engine/errors';
+import { classifyError, OwnershipLostError } from '../engine/errors';
 import { ExecutionEngine } from '../engine/execution/execution-engine';
 import { PrismaRunStore } from './prisma-run-store';
 
@@ -56,14 +56,16 @@ export class RunWorkerService {
     const started = Date.now();
     this.logger.info(fields, 'Run started');
 
+    const { claim } = claimed;
     try {
-      const outcome = await this.engine.execute(runId, { isFinalAttempt });
-      await this.store.finishRun(runId, outcome.status);
+      const outcome = await this.engine.execute(runId, { isFinalAttempt, claim });
+      await this.store.finishRun(runId, outcome.status, claim);
       this.logger.info(
         { ...fields, status: outcome.status, durationMs: Date.now() - started },
         'Run finished',
       );
     } catch (err) {
+      if (err instanceof OwnershipLostError) return this.ownershipLost(fields);
       const error = classifyError(err);
       const final = !error.retryable || isFinalAttempt;
       const logFields = {
@@ -73,9 +75,10 @@ export class RunWorkerService {
       };
 
       try {
-        if (final) await this.store.failRun(runId, error);
-        else await this.store.requeueRun(runId, error);
+        if (final) await this.store.failRun(runId, error, claim);
+        else await this.store.requeueRun(runId, error, claim);
       } catch (persistErr) {
+        if (persistErr instanceof OwnershipLostError) return this.ownershipLost(fields);
         // Database unavailable: let BullMQ retry; the run is re-claimed from RUNNING.
         this.logger.warn(
           { ...logFields, persistError: (persistErr as Error).message },
@@ -92,5 +95,14 @@ export class RunWorkerService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Another worker claimed the run after this one (this job was treated as stalled and
+   * redelivered). The newer claim owns the run; this worker writes nothing more. Returning
+   * (not throwing) keeps BullMQ from retrying on our behalf — the job is the other worker's.
+   */
+  private ownershipLost(fields: Record<string, unknown>): void {
+    this.logger.warn(fields, 'Run was claimed by another worker; stopping without changes');
   }
 }
