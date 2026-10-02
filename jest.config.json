@@ -1,0 +1,51 @@
+{
+  "displayName": "unit",
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
+  "rootDir": ".",
+  "transform": {
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "tsconfig": "<rootDir>/tsconfig.spec.json"
+      }
+    ]
+  },
+  "testEnvironment": "node",
+  "roots": [
+    "<rootDir>/src"
+  ],
+  "testRegex": ".*\\.spec\\.ts$",
+  "setupFiles": [
+    "<rootDir>/test/support/block-external-http.ts"
+  ],
+  "moduleNameMapper": {
+    "^@/(.*)$": "<rootDir>/src/$1"
+  },
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/**/*.spec.ts",
+    "!src/main.ts",
+    "!src/worker.ts",
+    "!src/engine/execution/testing/**",
+    "!src/**/*.module.ts"
+  ],
+  "coverageDirectory": "<rootDir>/coverage/unit",
+  "coverageThreshold": {
+    "./src/engine/": {
+      "lines": 90
+    },
+    "./src/engine/expressions/": {
+      "lines": 90
+    },
+    "./src/engine/validation/": {
+      "lines": 90
+    },
+    "./src/infrastructure/crypto/": {
+      "lines": 90
+    }
+  }
+}

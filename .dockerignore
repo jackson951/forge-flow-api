@@ -1,5 +1,16 @@
+# Never in the build context: secrets, local state, and files the image does not need.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 node_modules
 dist
 coverage
-.env
 .git
+.github
+.vscode
+.idea
+test
+docs
+*.log

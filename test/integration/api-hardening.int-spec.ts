@@ -10,6 +10,8 @@ import { REQUIRED_ROLE_KEY } from '../../src/common/decorators/require-role.deco
 import { AppConfigService } from '../../src/config/app-config.service';
 import { Env } from '../../src/config/env.schema';
 import { PrismaService } from '../../src/infrastructure/prisma/prisma.service';
+import { REDIS_CLIENT } from '../../src/infrastructure/redis/redis.module';
+import Redis from 'ioredis';
 import { bearer, registerUser, RegisteredUser, uniqueEmail } from '../support/auth';
 import { createTestApp } from '../support/create-app';
 import { fillPath, listRoutes } from '../support/routes';
@@ -209,6 +211,26 @@ describe('API hardening (integration, Part 18)', () => {
       expect((await hook(serverA, 'test')).status).toBe(429);
       expect((await hook(serverA, 'github')).status).not.toBe(429); // other provider, own budget
     });
+  });
+
+  it('fails open when Redis is unavailable: requests still work, unthrottled (Part 19 fix)', async () => {
+    const redis = a.get<Redis>(REDIS_CLIENT);
+    const evalSpy = jest
+      .spyOn(redis, 'eval')
+      .mockRejectedValue(
+        new Error("Stream isn't writeable and enableOfflineQueue options is false"),
+      );
+    try {
+      const clientIp = ip();
+      for (let i = 0; i < 7; i++) {
+        const res = await from(serverA, clientIp)
+          .post('/api/v1/auth/login')
+          .send({ email: 'nobody@example.test', password: 'wrong password guess' });
+        expect(res.status).toBe(401); // not 500, and not 429 (limits suspended)
+      }
+    } finally {
+      evalSpy.mockRestore();
+    }
   });
 
   describe('payloads (AC-18.3)', () => {

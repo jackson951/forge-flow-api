@@ -1,0 +1,23 @@
+{
+  "rootDir": "..",
+  "projects": [
+    "<rootDir>/jest.config.json",
+    "<rootDir>/test/jest-int.json",
+    "<rootDir>/test/jest-e2e.json"
+  ],
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/**/*.spec.ts",
+    "!src/main.ts",
+    "!src/worker.ts",
+    "!src/engine/execution/testing/**"
+  ],
+  "coverageDirectory": "<rootDir>/coverage/all",
+  "coverageReporters": ["text-summary", "json-summary", "lcov"],
+  "coverageThreshold": {
+    "global": {
+      "lines": 70,
+      "statements": 70
+    }
+  }
+}

@@ -1,7 +1,6 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { TestingModule } from '@nestjs/testing';
 import { RunStatus } from '@prisma/client';
-import { PinoLogger } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -10,6 +9,7 @@ import { RunWorkerService } from '../../src/execution/run-worker.service';
 import { PrismaService } from '../../src/infrastructure/prisma/prisma.service';
 import { RunQueue } from '../../src/infrastructure/queue/run-queue.service';
 import { bearer, registerUser, RegisteredUser } from '../support/auth';
+import { captureLogs } from '../support/canaries';
 import { createTestApp } from '../support/create-app';
 import { createTestWorker, waitFor } from '../support/create-worker';
 import { createRun } from '../support/factories';
@@ -94,16 +94,7 @@ describe('Run history and observability (integration)', () => {
   let failRuns: string[];
 
   beforeAll(async () => {
-    for (const level of ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const) {
-      const original = PinoLogger.prototype[level];
-      jest.spyOn(PinoLogger.prototype, level).mockImplementation(function (
-        this: PinoLogger,
-        ...args: unknown[]
-      ) {
-        logged.push(args);
-        return (original as (...a: unknown[]) => void).apply(this, args);
-      });
-    }
+    captureLogs(logged);
     api = await createTestApp();
     server = api.getHttpServer();
     prisma = api.get(PrismaService);

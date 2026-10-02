@@ -1,17 +1,28 @@
 {
+  "displayName": "e2e",
   "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
-  "testEnvironment": "node",
-  "testRegex": ".e2e-spec.ts$",
+  "rootDir": "..",
   "transform": {
     "^.+\\.(t|j)s$": [
       "ts-jest",
       {
-        "tsconfig": "<rootDir>/../tsconfig.spec.json"
+        "tsconfig": "<rootDir>/tsconfig.spec.json"
       }
     ]
   },
-  "setupFiles": ["<rootDir>/setup-env.ts"],
-  "testTimeout": 30000,
-  "globalTeardown": "<rootDir>/global-teardown.ts"
+  "testEnvironment": "node",
+  "roots": ["<rootDir>/test/e2e"],
+  "testRegex": ".e2e-spec.ts$",
+  "globalSetup": "<rootDir>/test/integration/global-setup.ts",
+  "setupFiles": ["<rootDir>/test/setup-int-env.ts"],
+  "globalTeardown": "<rootDir>/test/global-teardown.ts",
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/**/*.spec.ts",
+    "!src/main.ts",
+    "!src/worker.ts",
+    "!src/engine/execution/testing/**"
+  ],
+  "coverageDirectory": "<rootDir>/coverage/e2e",
+  "setupFilesAfterEnv": ["<rootDir>/test/support/jest-timeout.ts"]
 }

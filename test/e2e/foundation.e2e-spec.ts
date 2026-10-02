@@ -1,10 +1,10 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import Redis from 'ioredis';
 import request from 'supertest';
-import { AppConfigService } from '../src/config/app-config.service';
-import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
-import { REDIS_CLIENT } from '../src/infrastructure/redis/redis.module';
-import { createTestApp } from './support/create-app';
+import { AppConfigService } from '../../src/config/app-config.service';
+import { PrismaService } from '../../src/infrastructure/prisma/prisma.service';
+import { REDIS_CLIENT } from '../../src/infrastructure/redis/redis.module';
+import { createTestApp } from '../support/create-app';
 
 /**
  * Requires PostgreSQL and Redis (`docker compose up -d postgres redis`)
