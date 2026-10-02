@@ -21,7 +21,7 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 11 | [Conditions and Data Mapping](11-CONDITIONS-AND-DATA-MAPPING.md) | COMPLETE | All 5 acceptance criteria verified 2026-10-01; nested AND/OR/NOT, 13 operators, templates; no code execution. Not yet pushed/CI-verified |
 | 12 | [AI Integration](12-AI-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-02; Anthropic provider + deterministic fake, summarize/classify/extract with zod validation and one repair, worker-only, external HTTP blocked in tests. Not yet pushed/CI-verified |
 | 13 | [Slack Integration](13-SLACK-INTEGRATION.md) | COMPLETE | All 6 acceptance criteria verified 2026-10-02, incl. a real Slack workspace (flagship: GitHub issue → AI → HIGH → Slack message; LOW → none). Run queue now honours provider `Retry-After`. Not yet pushed/CI-verified |
-| 14 | [Microsoft Graph Integration](14-MICROSOFT-GRAPH-INTEGRATION.md) | NOT STARTED | Provider stub |
+| 14 | [Microsoft Graph Integration](14-MICROSOFT-GRAPH-INTEGRATION.md) | BLOCKED | Implemented; AC-14.1–14.4 and 14.6 verified 2026-10-02 (simulated Microsoft + live connect and refresh with a real Entra app). **Blocked on the manual part of AC-14.5:** creating a real To Do task needs an account with To Do (the test account is a guest without a mailbox) |
 | 15 | [Idempotency and Side-Effect Safety](15-IDEMPOTENCY-AND-SIDE-EFFECT-SAFETY.md) | NOT STARTED | — |
 | 16 | [Run History and Observability](16-RUN-HISTORY-AND-OBSERVABILITY.md) | NOT STARTED | Runs/dashboard stubs |
 | 17 | [Integration Credential Security](17-INTEGRATION-CREDENTIAL-SECURITY.md) | COMPLETE | All 7 acceptance criteria verified 2026-10-02; AES-256-GCM with AAD, key rotation CLI, shared redactor in storage/validator/logs, architecture test. Not yet pushed/CI-verified |
@@ -248,3 +248,4 @@ flowchart TD
 | 2026-10-02 | Part 17 CI green (PR #9). Part 12 implemented and verified → COMPLETE. AI `text` also accepts `{ ref }` because Part 11 caps templates at 16 KB. Next: Part 13 (Slack). |
 | 2026-10-02 | Part 12 merged (PR #10). Part 10 verified with the real GitHub App → COMPLETE; request logs now redact OAuth `code`/`state`. Next: Part 13 (Slack). |
 | 2026-10-02 | Part 13 implemented and verified with a real Slack workspace → COMPLETE (flagship workflow works end to end). Run jobs now use a custom backoff that honours `Retry-After`. Next: Part 14 (Microsoft Graph) or 15 (idempotency). |
+| 2026-10-02 | Parts 10 and 13 merged (PR #13, #16). Part 14 implemented (PKCE, locked refresh with rotation, To Do action); live connect/refresh verified → BLOCKED only on a real task creation with a To Do-capable account. |

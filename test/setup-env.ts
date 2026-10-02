@@ -13,9 +13,10 @@ process.env.QUEUE_BACKOFF_MS ??= '50';
 process.env.QUEUE_JOB_ATTEMPTS ??= '3';
 // Enables the non-production TEST webhook provider.
 process.env.WEBHOOK_TEST_SECRET ??= 'integration-test-webhook-secret';
-// Credential encryption for tests (fresh random key per test file; DB is truncated per suite).
-process.env.ENCRYPTION_KEYS ??= `test1:${randomBytes(32).toString('base64')}`;
-process.env.ENCRYPTION_ACTIVE_KEY_ID ??= 'test1';
+// Credential encryption for tests: a fresh random key per test file (DB is truncated per
+// suite). Forced, so keys from a developer's .env are never used by tests.
+process.env.ENCRYPTION_KEYS = `test1:${randomBytes(32).toString('base64')}`;
+process.env.ENCRYPTION_ACTIVE_KEY_ID = 'test1';
 // AI steps use the deterministic fake; forced so a real key in .env is never used by tests.
 process.env.AI_PROVIDER = 'fake';
 process.env.AI_API_URL = 'http://127.0.0.1:9';

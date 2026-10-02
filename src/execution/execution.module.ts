@@ -13,6 +13,9 @@ import { AiModule } from '../modules/ai/ai.module';
 import { createAiHandlers } from '../modules/ai/ai.node-types';
 import { CredentialStore } from '../modules/integrations/credentials/credential-store';
 import { GITHUB_HANDLERS } from '../modules/integrations/github/github.node-types';
+import { MicrosoftClient } from '../modules/integrations/microsoft/microsoft-client';
+import { MicrosoftTokenManager } from '../modules/integrations/microsoft/microsoft-token-manager';
+import { createMicrosoftHandlers } from '../modules/integrations/microsoft/microsoft.node-types';
 import { SlackClient } from '../modules/integrations/slack/slack-client';
 import { createSlackHandlers } from '../modules/integrations/slack/slack.node-types';
 import { PrismaRunStore } from './prisma-run-store';
@@ -28,18 +31,30 @@ import { WorkerConnections } from './worker-connections';
     CredentialStore,
     SlackClient,
     WorkerConnections,
+    MicrosoftClient,
+    MicrosoftTokenManager,
     {
       provide: NODE_HANDLERS,
-      inject: [AI_PROVIDER, AppConfigService, SlackClient, WorkerConnections],
+      inject: [
+        AI_PROVIDER,
+        AppConfigService,
+        SlackClient,
+        WorkerConnections,
+        MicrosoftClient,
+        MicrosoftTokenManager,
+      ],
       useFactory: (
         ai: AiProvider | null,
         config: AppConfigService,
         slack: SlackClient,
         connections: WorkerConnections,
+        microsoft: MicrosoftClient,
+        microsoftTokens: MicrosoftTokenManager,
       ): NodeHandler[] => [
         ...BUILT_IN_HANDLERS,
         ...GITHUB_HANDLERS,
         ...createSlackHandlers(slack, connections),
+        ...createMicrosoftHandlers(microsoft, microsoftTokens),
         ...createAiHandlers(ai, config.ai),
       ],
     },
