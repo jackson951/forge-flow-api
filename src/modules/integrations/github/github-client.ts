@@ -4,7 +4,8 @@ import { createSign } from 'node:crypto';
 import { AppConfigService } from '../../../config/app-config.service';
 import { ExecutionError, PermanentError, RetryableError } from '../../../engine/errors';
 
-const TIMEOUT_MS = 10_000;
+/** Every GitHub call is aborted after this (Part 18: ≤ 30 s). */
+export const GITHUB_TIMEOUT_MS = 10_000;
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000;
 
 export interface GitHubInstallation {
@@ -151,7 +152,7 @@ export class GitHubClient {
 
   private async fetch(url: string, init: RequestInit): Promise<Response> {
     try {
-      return await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) });
     } catch (err) {
       const timedOut = (err as Error).name === 'TimeoutError';
       throw new RetryableError(

@@ -1,6 +1,6 @@
 # 18 — Rate Limiting and API Hardening
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-02) — evidence below; AC-18.7 is verified locally and the audit step runs in CI from this branch on; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -88,3 +88,87 @@ Parts 01, 03, 04, 09; best done after Parts 10–14 so all routes exist.
 ## Implementation Notes
 
 Scaffold already has a global in-memory `ThrottlerGuard` and per-route `@Throttle` on auth/webhooks; this part moves storage to Redis and completes coverage.
+
+## As implemented
+
+### Rate limits (`src/common/throttling/rate-limits.ts`)
+
+| Scope | Limit / min | Key |
+| --- | --- | --- |
+| Authenticated routes | 300 | user id (`default` throttler) |
+| Any route | 3 000 | client IP (`ip` throttler, flood cap) |
+| `POST /auth/login` | 5 and 20 | IP + email, and IP |
+| `POST /auth/register` | 5 | IP |
+| `POST /auth/refresh` | 30 | IP |
+| `POST /webhooks/:provider` | 600 | provider + IP |
+
+- Counters live in **Redis** (`RedisThrottlerStorage`, one atomic Lua script per hit: fixed window + block key), under `<QUEUE_PREFIX>:throttle:*`, so every API instance shares them. No new dependency.
+- The throttler guard now runs **after** the auth guard, so authenticated limits are per user (before, it ran first and could only count per IP). Public routes are still limited by IP / IP+email. Requests with an invalid token are rejected by the cheap JWT check before being counted.
+- Exceeding a limit → `429` with `Retry-After` (seconds); documented in the Swagger description.
+- `TRUST_PROXY` (hop count, default 0) sets Express `trust proxy`, so `req.ip` is the client behind a load balancer.
+
+### Request handling
+
+| Item | Implementation |
+| --- | --- |
+| Body parsers | App created with `bodyParser: false` (`APP_OPTIONS`); only JSON parsers are registered: **300 KB** globally, 1 MB on `/webhooks` (raw body kept for signatures). URL-encoded and other bodies are not parsed. Oversize → 413, malformed → 400, neither echoes the body |
+| Body limit decision | **300 KB, not 256 KB:** the largest legal workflow draft (256 KB definition, FR-18.5) plus its request envelope must fit. Recorded deviation |
+| Validation | `whitelist`, `forbidNonWhitelisted`, `transform`, `enableImplicitConversion: false` (explicit `@Type` on query numbers); no DTO has array fields (workflow arrays are capped by the definition schema) |
+| Pagination | `limit` ≤ 100 on every list (runs, workflows, versions, channels via the shared DTO) |
+| Workflow size | Drafts over 50 nodes, 100 edges or 256 KB are refused with 400 `LIMIT_EXCEEDED` (never stored) |
+| Helmet | API: `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` (no helmet defaults merged), `Cross-Origin-Resource-Policy: same-site`, HSTS, nosniff, no `X-Powered-By`. Swagger UI (`/api/docs`): helmet's standard CSP so it can load its own assets |
+| CORS | Explicit origins (`CORS_ORIGINS`, never `*`), credentials, methods `GET,POST,PUT,PATCH,DELETE`, headers `Authorization, Content-Type, Idempotency-Key, x-request-id`, exposes `x-request-id`, `Retry-After` |
+| Provider timeouts | GitHub 10 s, Slack 10 s, Microsoft 15 s, AI `AI_TIMEOUT_MS` (default 20 s, max 30 s enforced at startup); a test fails if any source file calls `fetch` without `AbortSignal.timeout` |
+| SSRF | No node type accepts a URL/host setting (test over every node type's config schema); provider base URLs are server configuration only. Microsoft paging links are followed only on the Graph host (Part 14). The policy above applies before any configurable HTTP node is added |
+| Dependencies | `npm audit --audit-level=high` in CI; Dependabot (npm weekly, grouped Nest/Prisma; GitHub Actions monthly) |
+
+### Dependency audit exceptions
+
+None remaining. Two advisories were fixed with **scoped npm overrides** (no major upgrades or downgrades):
+
+| Package | Advisory | Path | Fix |
+| --- | --- | --- | --- |
+| `deepmerge-ts` < 8 (high) | stack exhaustion merging recursive objects | `prisma` → `@prisma/config` (CLI config loading only) | `overrides["@prisma/config"]["deepmerge-ts"] = 8.0.2`; `prisma validate`, `generate`, `migrate status/deploy` verified |
+| `js-yaml` 5.0–5.4.0 (moderate) | CPU use with empty merge sources | `@nestjs/swagger` | `overrides["@nestjs/swagger"]["js-yaml"] = 5.4.2`; Swagger UI verified |
+
+npm's own suggestion was a Prisma downgrade (6.12) and a Swagger major upgrade; the scoped overrides keep the versions in use and touch nothing else (a global `js-yaml` override would break tools that need v3/v4).
+
+## Implementation Evidence
+
+Verified 2026-10-02 on branch `feat/part-18-api-hardening` (from `main` at `5779749`).
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint (0 warnings), typecheck, build | pass |
+| `npm audit --audit-level=high` | 0 vulnerabilities |
+| `npm test` | 546 passed (`provider-timeouts.spec.ts`, `no-outbound-urls.spec.ts`) |
+| `npm run test:e2e` | 16 passed |
+| `npm run test:int` | 286 passed (16 in `test/integration/api-hardening.int-spec.ts`) |
+
+### Acceptance criteria
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| AC-18.1 | PASS | Integration: login 5 per IP+email (other email / other IP unaffected), 20 per IP across emails; register 5; refresh 30; authenticated 300 per user (another user unaffected); webhooks 600 per provider+IP (another provider unaffected); every 429 carries `Retry-After` |
+| AC-18.2 | PASS | Two API instances sharing Redis: requests alternate between them and the limits hold in total (mutation: in-memory storage → 5 rate-limit tests fail) |
+| AC-18.3 | PASS | 310 KB JSON → 413 without echo; 400 KB signed webhook (event data < 256 KB) → 202; 1.1 MB webhook → 413; URL-encoded registration not parsed (400, no user created); malformed JSON → 400 without echo |
+| AC-18.4 | PASS | Route inventory: every controller method's access (public/user/member/admin/owner) read from decorators equals the reviewed table, and the table equals every served `/api/v1` route; malformed path ids on every route → 400/404, never 2xx/500 (the OAuth callback always redirects with `reason=unknown_provider`) |
+| AC-18.5 | PASS | `limit=101` → 400 and `limit=100` → 200 on runs, workflows, versions; drafts with 51 nodes, 101 edges or > 256 KB → 400 `LIMIT_EXCEEDED`, nothing saved |
+| AC-18.6 | PASS | Unit per client: the signal passed to `fetch` comes from `AbortSignal.timeout` with the client's limit (≤ 30 s); `AI_TIMEOUT_MS` > 30 000 refused at startup; source scan for `fetch` without timeout |
+| AC-18.7 | PASS (local) | `npm audit --audit-level=high` → 0 vulnerabilities after the overrides above; CI step added (`.github/workflows/ci.yml`) — CI output will show on the PR |
+
+Also verified: API CSP is exactly `default-src 'none';frame-ancestors 'none'`; CORS rejects other origins and lists only the allowed methods/headers.
+
+**Mutation checks** (each made tests fail, then reverted): in-memory throttle storage; throttler guard before the auth guard (per-user limit test); default body parsers re-enabled (URL-encoded test).
+
+### Found and fixed during this part
+
+- **Rate limits were per instance** (in-memory) — now in Redis.
+- **"Per user" limits were impossible:** the throttler ran before authentication and only ever saw IPs.
+- **Login had no per-IP limit** (password spraying across many emails from one IP); **webhooks were limited per IP for all providers together.**
+- **URL-encoded bodies were parsed** (Nest's default parser) although the API only accepts JSON.
+- **Helmet merged its default document CSP** into the API policy; the API now sends exactly `default-src 'none'`.
+- **AI timeout was unbounded** in configuration; now ≤ 30 s.
+- **3 high + 2 moderate dependency advisories** — fixed with scoped overrides.
