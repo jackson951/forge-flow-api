@@ -21,7 +21,7 @@ import { RetryRunDto } from './dto/retry-run.dto';
 import { RetriedRun, RunDispatcherService } from './run-dispatcher.service';
 import { RunsService } from './runs.service';
 
-/** Handlers arrive in Part 16; roles follow the Part 04 matrix. */
+/** Run history, retry and cancel (Parts 15–16). Reads: MEMBER; retry/cancel: ADMIN. */
 @ApiTags('Runs')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/runs')
@@ -39,6 +39,12 @@ export class RunsController {
   @Get(':id')
   get(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
     return this.runs.get(ws.workspaceId, id);
+  }
+
+  /** Steps in execution order, with sanitised input/output and errors. */
+  @Get(':id/steps')
+  steps(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.runs.steps(ws.workspaceId, id);
   }
 
   @RequireRole('ADMIN')
@@ -69,6 +75,6 @@ export class RunsController {
   @HttpCode(HttpStatus.OK)
   @Post(':id/cancel')
   cancel(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
-    return this.runs.cancel(ws.workspaceId, id);
+    return this.runs.cancel(ws, id);
   }
 }
