@@ -4,7 +4,8 @@ import { providerNetworkError } from '../../../common/http/fetch-failure';
 import { AppConfigService } from '../../../config/app-config.service';
 import { ExecutionError, PermanentError, RetryableError } from '../../../engine/errors';
 
-const TIMEOUT_MS = 15_000;
+/** Every Microsoft call is aborted after this (Part 18: ≤ 30 s). */
+export const MICROSOFT_TIMEOUT_MS = 15_000;
 const MAX_LIST_PAGES = 10;
 
 /** Delegated scopes requested on connect — least privilege (Part 14). Nothing else. */
@@ -223,7 +224,7 @@ export class MicrosoftClient {
           scope: MICROSOFT_SCOPES.join(' '),
           ...params,
         }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(MICROSOFT_TIMEOUT_MS),
       });
     } catch (err) {
       throw networkError(err, false, 'Microsoft sign-in');
@@ -274,7 +275,7 @@ export class MicrosoftClient {
           ...(json && { 'content-type': 'application/json' }),
         },
         body: json ? JSON.stringify(json) : undefined,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(MICROSOFT_TIMEOUT_MS),
       });
     } catch (err) {
       throw networkError(err, sideEffect, 'Microsoft Graph');

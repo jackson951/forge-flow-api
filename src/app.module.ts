@@ -6,7 +6,11 @@ import { AuthGuard } from './common/guards/auth.guard';
 import { WorkspaceAccessGuard } from './common/guards/workspace-access.guard';
 import { createValidationPipe } from './common/pipes/validation.pipe';
 import { AppConfigService } from './config/app-config.service';
+import { byIp, byUserOrIp, MINUTE, RATE_LIMITS } from './common/throttling/rate-limits';
 import { CoreModule } from './core/core.module';
+import { REDIS_CLIENT } from './infrastructure/redis/redis.module';
+import { RedisThrottlerStorage } from './infrastructure/throttling/redis-throttler.storage';
+import Redis from 'ioredis';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -23,9 +27,19 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
   imports: [
     CoreModule,
     ThrottlerModule.forRootAsync({
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => ({
-        throttlers: [{ ttl: 60_000, limit: 100 }],
+      inject: [AppConfigService, REDIS_CLIENT],
+      useFactory: (config: AppConfigService, redis: Redis) => ({
+        throttlers: [
+          {
+            name: 'default',
+            ttl: MINUTE,
+            limit: RATE_LIMITS.authenticatedPerUser,
+            getTracker: byUserOrIp,
+          },
+          { name: 'ip', ttl: MINUTE, limit: RATE_LIMITS.perIpFloodCap, getTracker: byIp },
+        ],
+        // Shared by all API instances (Part 18).
+        storage: new RedisThrottlerStorage(redis, config),
         skipIf: () => !config.throttleEnabled,
       }),
     }),
@@ -41,8 +55,10 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     DashboardModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
+    // After authentication, so limits can be counted per user; public routes are still
+    // limited (per IP / per IP+email).
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Runs after AuthGuard: checks membership/role on every route with a :workspaceId param.
     { provide: APP_GUARD, useClass: WorkspaceAccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
