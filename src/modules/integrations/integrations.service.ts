@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConnectionStatus, IntegrationProviderKey, Prisma, WorkspaceRole } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
@@ -16,6 +17,12 @@ import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../../infrastructure/crypto/encryption.service';
 import { CredentialStore } from './credentials/credential-store';
 import { GitHubClient, GitHubRepository } from './github/github-client';
+import {
+  MicrosoftAppCredentialsError,
+  MicrosoftClient,
+  TodoList,
+} from './microsoft/microsoft-client';
+import { MicrosoftTokenManager } from './microsoft/microsoft-token-manager';
 import { SlackChannel, SlackClient } from './slack/slack-client';
 import {
   ConnectionDeniedError,
@@ -44,6 +51,9 @@ export type ConnectionSummary = Prisma.IntegrationConnectionGetPayload<{
 }>;
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+const verifierAad = (stateHash: string) => `oauth-state:${stateHash}:codeVerifier`;
+const pkceChallenge = (verifier: string) =>
+  createHash('sha256').update(verifier).digest('base64url');
 
 @Injectable()
 export class IntegrationsService {
@@ -54,6 +64,8 @@ export class IntegrationsService {
     private readonly audit: AuditService,
     private readonly github: GitHubClient,
     private readonly slack: SlackClient,
+    private readonly microsoft: MicrosoftClient,
+    private readonly microsoftTokens: MicrosoftTokenManager,
     private readonly credentials: CredentialStore,
     private readonly encryption: EncryptionService,
     private readonly logger: PinoLogger,
@@ -83,16 +95,27 @@ export class IntegrationsService {
       throw new ServiceUnavailableException(`${key} is not configured on this server`);
     }
     const state = randomBytes(32).toString('base64url');
+    const stateHash = sha256(state);
+    // PKCE verifier: random, kept only encrypted with the state, bound to it via AAD.
+    const codeVerifier = provider.usesPkce ? randomBytes(32).toString('base64url') : undefined;
     await this.prisma.oAuthState.create({
       data: {
-        stateHash: sha256(state),
+        stateHash,
         provider: key,
         userId: access.userId,
         workspaceId: access.workspaceId,
+        encryptedCodeVerifier: codeVerifier
+          ? this.encryption.encrypt(codeVerifier, verifierAad(stateHash))
+          : null,
         expiresAt: new Date(Date.now() + STATE_TTL_MS),
       },
     });
-    return { url: provider.connectUrl(state) };
+    return {
+      url: provider.connectUrl(
+        state,
+        codeVerifier ? { codeChallenge: pkceChallenge(codeVerifier) } : undefined,
+      ),
+    };
   }
 
   /**
@@ -116,8 +139,22 @@ export class IntegrationsService {
       return this.frontend(slug, { status: 'error', reason: 'not_authorized' });
     }
 
+    let codeVerifier: string | undefined;
+    if (provider.usesPkce) {
+      try {
+        codeVerifier = state.encryptedCodeVerifier
+          ? this.encryption.decrypt(state.encryptedCodeVerifier, verifierAad(state.stateHash))
+          : undefined;
+      } catch {
+        codeVerifier = undefined;
+      }
+      if (!codeVerifier) return this.frontend(slug, { status: 'error', reason: 'invalid_state' });
+    }
+
     try {
-      const { credential, ...details } = await provider.completeConnection(query);
+      const { credential, ...details } = await provider.completeConnection(query, {
+        codeVerifier,
+      });
       const connection = await this.prisma.$transaction(async (tx) => {
         const saved = await tx.integrationConnection.upsert({
           where: {
@@ -162,7 +199,16 @@ export class IntegrationsService {
       return this.frontend(slug, { status: 'connected', connectionId: connection.id });
     } catch (err) {
       const reason = err instanceof ConnectionDeniedError ? err.reason : 'provider_error';
-      this.logger.warn({ provider: provider.key, reason }, 'Integration connection failed');
+      // ConnectionDeniedError messages are ours (provider error codes only, never tokens or
+      // provider bodies): log them so operators can diagnose; the browser gets only `reason`.
+      this.logger.warn(
+        {
+          provider: provider.key,
+          reason,
+          detail: err instanceof ConnectionDeniedError ? err.message : 'unexpected error',
+        },
+        'Integration connection failed',
+      );
       return this.frontend(slug, { status: 'error', reason });
     }
   }
@@ -250,11 +296,34 @@ export class IntegrationsService {
     }
   }
 
+  /** The connecting user's Microsoft To Do lists (for action configuration). */
+  async listMicrosoftTodoLists(workspaceId: string, connectionId: string): Promise<TodoList[]> {
+    const connection = await this.findConnection(workspaceId, connectionId);
+    if (connection.provider !== IntegrationProviderKey.MICROSOFT) {
+      throw new NotFoundException('Connection not found');
+    }
+    if (connection.status !== ConnectionStatus.CONNECTED) {
+      throw new ConflictException('This Microsoft connection needs attention; reconnect it');
+    }
+    try {
+      return await this.microsoftTokens.withToken(workspaceId, connection.id, (token) =>
+        this.microsoft.todoLists(token),
+      );
+    } catch (err) {
+      throw await this.providerFailure(connection.id, 'Microsoft', err);
+    }
+  }
+
   /**
    * Maps a provider failure during an API call: revoked access marks the connection
    * NEEDS_ATTENTION (409); other provider errors are 503 with the safe message.
    */
   private async providerFailure(connectionId: string, name: string, err: unknown) {
+    // FlowForge's own app credentials were rejected: a server problem, not the user's.
+    if (err instanceof MicrosoftAppCredentialsError) {
+      this.logger.error({ provider: name }, err.message);
+      return new ServiceUnavailableException(`${name} integration is misconfigured on this server`);
+    }
     if (err instanceof ExecutionError && err.category === 'PROVIDER_AUTH') {
       await this.prisma.integrationConnection.update({
         where: { id: connectionId },
@@ -262,7 +331,17 @@ export class IntegrationsService {
       });
       return new ConflictException(`${name} access was revoked; reconnect the integration`);
     }
-    if (err instanceof ExecutionError) return new ServiceUnavailableException(err.message);
+    if (err instanceof ExecutionError) {
+      this.logger.warn(
+        { provider: name, category: err.category, detail: err.message },
+        'Provider call failed',
+      );
+      // Permanent provider answers are about this connection or request (shown to the user);
+      // retryable ones mean "try again later".
+      return err.retryable
+        ? new ServiceUnavailableException(err.message)
+        : new UnprocessableEntityException(err.message);
+    }
     return err;
   }
 
@@ -276,7 +355,7 @@ export class IntegrationsService {
     if (consumed.count !== 1) return null;
     return this.prisma.oAuthState.findUniqueOrThrow({
       where: { stateHash },
-      select: { userId: true, workspaceId: true },
+      select: { userId: true, workspaceId: true, stateHash: true, encryptedCodeVerifier: true },
     });
   }
 

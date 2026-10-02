@@ -73,6 +73,15 @@ export class IntegrationsController {
     );
   }
 
+  /** Microsoft To Do lists of the connecting user (for action configuration). */
+  @Get(':connectionId/microsoft/todo-lists')
+  todoLists(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    return this.integrations.listMicrosoftTodoLists(ws.workspaceId, connectionId);
+  }
+
   @RequireRole('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':connectionId')
