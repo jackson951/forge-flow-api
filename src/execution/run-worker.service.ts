@@ -4,7 +4,19 @@ import { PinoLogger } from 'nestjs-pino';
 import { hostname } from 'node:os';
 import { classifyError, OwnershipLostError } from '../engine/errors';
 import { ExecutionEngine } from '../engine/execution/execution-engine';
+import { ProviderSlotsBusyError } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
+
+/**
+ * Thrown to the processor when a run was postponed (no provider slot free): the job is moved
+ * back to delayed without counting as an attempt.
+ */
+export class RunPostponedError extends Error {
+  constructor(readonly delayMs: number) {
+    super('Run postponed');
+    this.name = 'RunPostponedError';
+  }
+}
 
 export interface JobAttempt {
   jobId: string;
@@ -74,6 +86,7 @@ export class RunWorkerService {
       );
     } catch (err) {
       if (err instanceof OwnershipLostError) return this.ownershipLost(fields);
+      if (err instanceof ProviderSlotsBusyError) return this.postpone(runId, claim, err, fields);
       const error = classifyError(err);
       const final = !error.retryable || isFinalAttempt;
       const logFields = {
@@ -110,6 +123,35 @@ export class RunWorkerService {
       }
       throw err;
     }
+  }
+
+  /**
+   * No slot for the next step's provider: give the run back (QUEUED, attempt not counted) and
+   * let the processor delay the job. Steps already done stay done; the next claim resumes.
+   */
+  private async postpone(
+    runId: string,
+    claim: string,
+    err: ProviderSlotsBusyError,
+    fields: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      if (await this.store.isCancelRequested(runId)) {
+        await this.store.skipRemaining(runId, claim);
+        await this.store.finishRun(runId, 'CANCELLED', claim);
+        this.logger.info(fields, 'Run cancelled instead of postponed');
+        return;
+      }
+      await this.store.releaseRun(runId, claim);
+    } catch (persistErr) {
+      if (persistErr instanceof OwnershipLostError) return this.ownershipLost(fields);
+      throw persistErr;
+    }
+    this.logger.debug(
+      { ...fields, provider: err.provider, delayMs: err.retryAfterMs },
+      'Provider busy; run postponed',
+    );
+    throw new RunPostponedError(err.retryAfterMs);
   }
 
   /**

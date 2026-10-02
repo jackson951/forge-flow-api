@@ -1,4 +1,4 @@
-import { validateEnv } from './env.schema';
+import { connectionLimit, databaseUrlWithPool, validateEnv } from './env.schema';
 
 const base = {
   DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
@@ -102,6 +102,56 @@ describe('validateEnv', () => {
         SLACK_CLIENT_ID: 'x',
       };
       expect(() => validateEnv(prod)).toThrow(/ENCRYPTION_KEYS: required in production/);
+    });
+  });
+
+  describe('database pool (Part 21)', () => {
+    const url = 'postgresql://u:p@localhost:5432/db?schema=public';
+
+    it('uses the variable, else the URL parameter, else 10', () => {
+      expect(connectionLimit(url)).toBe(10);
+      expect(connectionLimit(`${url}&connection_limit=7`)).toBe(7);
+      expect(connectionLimit(`${url}&connection_limit=7`, 20)).toBe(20);
+      expect(connectionLimit(`${url}&connection_limit=abc`)).toBe(10);
+    });
+
+    it('always sets connection_limit on the URL, keeping other parameters', () => {
+      const out = new URL(databaseUrlWithPool(`${url}&connection_limit=3`, 12));
+      expect(out.searchParams.get('connection_limit')).toBe('12');
+      expect(out.searchParams.get('schema')).toBe('public');
+      expect(new URL(databaseUrlWithPool(url)).searchParams.get('connection_limit')).toBe('10');
+    });
+
+    it('refuses a pool too small for the worker concurrency', () => {
+      expect(() => validateEnv({ ...base, WORKER_CONCURRENCY: '20' })).toThrow(
+        /DATABASE_CONNECTION_LIMIT: pool of 10 is too small for WORKER_CONCURRENCY 20; use at least 22/,
+      );
+      expect(
+        validateEnv({ ...base, WORKER_CONCURRENCY: '20', DATABASE_CONNECTION_LIMIT: '22' }),
+      ).toMatchObject({ DATABASE_CONNECTION_LIMIT: 22 });
+      expect(() => validateEnv({ ...base, DATABASE_URL: `${url}&connection_limit=5` })).toThrow(
+        /pool of 5/,
+      );
+      expect(
+        validateEnv({ ...base, DATABASE_CONNECTION_LIMIT: '' }).DATABASE_CONNECTION_LIMIT,
+      ).toBeUndefined();
+    });
+  });
+
+  describe('retention (Part 21)', () => {
+    it('defaults to 30 / 30 / 90 days', () => {
+      expect(validateEnv(base)).toMatchObject({
+        RETENTION_WEBHOOK_DELIVERY_DAYS: 30,
+        RETENTION_STEP_PAYLOAD_DAYS: 30,
+        RETENTION_RUN_DAYS: 90,
+        QUEUE_BACKPRESSURE_THRESHOLD: 5_000,
+      });
+    });
+
+    it('rejects trimming payloads later than runs are deleted', () => {
+      expect(() =>
+        validateEnv({ ...base, RETENTION_STEP_PAYLOAD_DAYS: '100', RETENTION_RUN_DAYS: '90' }),
+      ).toThrow(/RETENTION_STEP_PAYLOAD_DAYS: must not exceed RETENTION_RUN_DAYS/);
     });
   });
 

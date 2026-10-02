@@ -13,6 +13,7 @@ import {
 } from '../errors';
 import { NodeHandlerRegistry } from './handler-registry';
 import { NodeHandler, NodeLogger, NodeResult } from './node-handler';
+import { ProviderSlotsBusyError, StepSlots } from './provider-slots';
 import { RunSnapshot, RunStore, StepSnapshot } from './run-store';
 import { IllegalTransitionError } from './transitions';
 import { jsonByteLength, sanitizeForStorage, toPlainJson } from './sanitize';
@@ -33,6 +34,10 @@ export interface EngineOptions {
   nodeTimeoutMs: number;
   maxOutputBytes?: number;
   log?: (level: 'info' | 'warn', message: string, fields: Record<string, unknown>) => void;
+  /** Per-provider concurrency (Part 21). Unset: no limit. */
+  slots?: StepSlots;
+  /** Delay before a run postponed for lack of a provider slot is tried again. */
+  slotRetryDelayMs?: () => number;
 }
 
 export interface AttemptInfo {
@@ -166,6 +171,30 @@ export class ExecutionEngine {
       return this.fail(run.id, node, attempt, 0, err);
     }
 
+    // Taken before the RUNNING marker: a step postponed for lack of a slot leaves no trace.
+    const slots = this.options.slots;
+    const release = slots?.tryAcquire(node.type);
+    if (release === null) {
+      throw new ProviderSlotsBusyError(
+        slots?.providerOf(node.type) ?? node.type,
+        this.options.slotRetryDelayMs?.() ?? 1_000,
+      );
+    }
+    try {
+      return await this.executeStep(run, node, handler, config, outputs, attempt);
+    } finally {
+      release?.();
+    }
+  }
+
+  private async executeStep(
+    run: RunSnapshot,
+    node: NodeDefinition,
+    handler: NodeHandler,
+    config: Record<string, unknown>,
+    outputs: Record<string, unknown>,
+    attempt: AttemptInfo,
+  ): Promise<unknown> {
     // The RUNNING marker is persisted before the handler runs (fenced: a worker that lost the
     // run never starts a step).
     let stepAttempt: number;

@@ -41,42 +41,31 @@ export class PrismaRunStore implements RunStore {
   // ── run lifecycle (worker) ─────────────────────────────────────────────────
 
   /**
-   * QUEUED → RUNNING (or RUNNING → RUNNING when a stalled job is redelivered after its
-   * worker died). Returns null when the run is terminal or cancelled, so the job just ends.
-   */
-  /**
    * Claims the run for this worker. QUEUED → RUNNING normally; RUNNING → RUNNING when a
    * stalled job is redelivered (its worker is presumed dead). Each claim stores a unique
    * fencing token in `lockedBy`: the newest claim owns the run, and every fenced write by an
-   * older claim fails with OwnershipLostError (Part 15).
+   * older claim fails with OwnershipLostError (Part 15). Returns null when the run is
+   * terminal or cancelled, so the job just ends.
+   *
+   * One statement (one commit) rather than update + update + select: commits are the
+   * bottleneck under load (Part 21, every commit waits for a WAL flush).
    */
   async claimRun(runId: string, workerId: string): Promise<ClaimedRun | null> {
     const claim = `${workerId}:${randomUUID()}`;
-    const claimed = await this.prisma.workflowRun.updateMany({
-      where: {
-        id: runId,
-        status: { in: runStatusesLeadingTo('RUNNING') },
-        cancelRequestedAt: null,
-      },
-      data: { status: RunStatus.RUNNING, attemptCount: { increment: 1 }, lockedBy: claim },
-    });
-    if (claimed.count === 0) return null;
-    await this.prisma.workflowRun.updateMany({
-      where: { id: runId, startedAt: null },
-      data: { startedAt: new Date() },
-    });
-    const run = await this.prisma.workflowRun.findUniqueOrThrow({
-      where: { id: runId },
-      select: {
-        id: true,
-        workspaceId: true,
-        workflowId: true,
-        workflowVersionId: true,
-        correlationId: true,
-        attemptCount: true,
-      },
-    });
-    return { ...run, claim };
+    const from = runStatusesLeadingTo('RUNNING');
+    const rows = await this.prisma.$queryRaw<Omit<ClaimedRun, 'claim'>[]>`
+      UPDATE "WorkflowRun"
+      SET status = 'RUNNING',
+          "attemptCount" = "attemptCount" + 1,
+          "lockedBy" = ${claim},
+          "startedAt" = COALESCE("startedAt", now()),
+          "updatedAt" = now()
+      WHERE id = ${runId}::uuid
+        AND status = ANY(${from}::"RunStatus"[])
+        AND "cancelRequestedAt" IS NULL
+      RETURNING id, "workspaceId", "workflowId", "workflowVersionId", "correlationId",
+                "attemptCount"`;
+    return rows.length ? { ...rows[0], claim } : null;
   }
 
   async finishRun(runId: string, status: 'SUCCEEDED' | 'CANCELLED', claim: string): Promise<void> {
@@ -102,6 +91,17 @@ export class PrismaRunStore implements RunStore {
       lockedBy: null,
       lastErrorCategory: error.category,
       errorMessage: error.message,
+    });
+  }
+
+  /**
+   * RUNNING → QUEUED without an error: the run was postponed before its next step started
+   * (no provider slot, Part 21). The claim's attempt is given back, since nothing was tried.
+   */
+  async releaseRun(runId: string, claim: string): Promise<void> {
+    await this.transitionRun(runId, claim, RunStatus.QUEUED, {
+      lockedBy: null,
+      attemptCount: { decrement: 1 },
     });
   }
 
