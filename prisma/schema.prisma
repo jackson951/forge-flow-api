@@ -259,6 +259,8 @@ model WorkflowRun {
   errorMessage      String?
   lockedBy          String?
   cancelRequestedAt DateTime?      @db.Timestamptz(3)
+  /// Set when retention cleared the steps' stored input/output (Part 21).
+  payloadsTrimmedAt DateTime?      @db.Timestamptz(3)
   queuedAt          DateTime       @default(now()) @db.Timestamptz(3)
   startedAt         DateTime?      @db.Timestamptz(3)
   completedAt       DateTime?      @db.Timestamptz(3)
@@ -281,6 +283,12 @@ model WorkflowRun {
   @@index([workflowId, createdAt])
   @@index([status, queuedAt])
   @@index([webhookDeliveryId])
+  // Deleting runs sets retryOfRunId to NULL on their retries: without this index every
+  // deleted run costs a full scan (Part 21).
+  @@index([retryOfRunId])
+  // Retention: oldest untrimmed runs first, and oldest runs overall.
+  @@index([payloadsTrimmedAt, createdAt])
+  @@index([createdAt])
 }
 
 /// One row per node per run; retries of the same node increment attemptCount.

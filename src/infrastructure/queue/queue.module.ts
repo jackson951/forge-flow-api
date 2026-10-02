@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Global, Module } from '@nestjs/common';
 import { AppConfigService } from '../../config/app-config.service';
 import { QUEUES } from './queue.constants';
+import { QueueBackpressure } from './queue-backpressure.service';
 import { RunQueue } from './run-queue.service';
 
 /**
@@ -21,7 +22,7 @@ import { RunQueue } from './run-queue.service';
     }),
     BullModule.registerQueue({ name: QUEUES.WORKFLOW_RUNS }, { name: QUEUES.MAINTENANCE }),
   ],
-  providers: [RunQueue],
-  exports: [BullModule, RunQueue],
+  providers: [RunQueue, QueueBackpressure],
+  exports: [BullModule, RunQueue, QueueBackpressure],
 })
 export class QueueModule {}

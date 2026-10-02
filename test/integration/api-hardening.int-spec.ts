@@ -94,7 +94,9 @@ describe('API hardening (integration, Part 18)', () => {
   let ws: string;
 
   /** Each test speaks from its own client IP (X-Forwarded-For, trusted one hop). */
-  const ip = () => `203.0.113.${Math.floor(Math.random() * 250) + 1}`;
+  // Unique per call: a random pick could repeat and share a rate-limit counter.
+  let nextIp = Math.floor(Math.random() * 100);
+  const ip = () => `203.0.${113 + Math.floor(nextIp / 250)}.${(nextIp++ % 250) + 1}`;
   const from = (server: App, clientIp: string) => ({
     post: (path: string) => request(server).post(path).set('X-Forwarded-For', clientIp),
     get: (path: string) => request(server).get(path).set('X-Forwarded-For', clientIp),

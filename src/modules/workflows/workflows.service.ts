@@ -294,8 +294,10 @@ export class WorkflowsService {
   }
 }
 
+/** See RunsService.list: the redundant `lte` lets Postgres start the index scan at the cursor. */
 function keysetAfter(cursor: Cursor): Prisma.WorkflowWhereInput {
   return {
+    AND: [{ createdAt: { lte: cursor.createdAt } }],
     OR: [
       { createdAt: { lt: cursor.createdAt } },
       { createdAt: cursor.createdAt, id: { lt: cursor.id } },

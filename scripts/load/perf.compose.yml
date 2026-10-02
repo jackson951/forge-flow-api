@@ -1,0 +1,65 @@
+# Part 21 perf stack (scripts/load/README.md): separate names, ports, volumes and network;
+# never reads .env, so no real secrets reach these containers.
+x-perf-env: &perf-env
+  NODE_ENV: test
+  LOG_LEVEL: info
+  THROTTLE_ENABLED: "false"
+  QUEUE_PREFIX: perf
+  WEBHOOK_TEST_SECRET: ${PERF_WEBHOOK_SECRET}
+  JWT_ACCESS_SECRET: ${PERF_JWT_ACCESS}
+  JWT_REFRESH_SECRET: ${PERF_JWT_REFRESH}
+  DATABASE_URL: postgresql://flowforge:flowforge@postgres:5432/flowforge?schema=public
+  REDIS_HOST: redis
+  WORKER_CONCURRENCY: "5"
+  SWEEPER_INTERVAL_MS: "30000"
+  RETENTION_ENABLED: "false"
+
+services:
+  postgres:
+    container_name: ffp-postgres
+    ports: !override
+      - "127.0.0.1:15433:5432"
+  redis:
+    container_name: ffp-redis
+    ports: !override
+      - "127.0.0.1:16379:6379"
+  migrate:
+    container_name: ffp-migrate
+  api:
+    container_name: ffp-api
+    env_file: !reset []
+    environment: *perf-env
+    ports: !override
+      - "127.0.0.1:13000:3000"
+  api2:
+    image: flowforge-api:local
+    container_name: ffp-api2
+    init: true
+    stop_grace_period: 30s
+    command: ["node", "dist/main.js"]
+    environment: *perf-env
+    ports:
+      - "127.0.0.1:13001:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - flowforge-network
+    profiles:
+      - full
+  worker:
+    container_name: !reset null
+    env_file: !reset []
+    environment:
+      <<: *perf-env
+      WORKER_HEARTBEAT_FILE: /tmp/flowforge-worker.heartbeat
+volumes:
+  pgdata:
+    name: ffp-pgdata
+  redisdata:
+    name: ffp-redisdata
+networks:
+  flowforge-network:
+    name: ffp-network
