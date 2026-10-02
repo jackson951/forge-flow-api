@@ -21,6 +21,7 @@ const json = (value: unknown) => value as Prisma.InputJsonValue;
 export interface ClaimedRun {
   id: string;
   workspaceId: string;
+  workflowId: string;
   workflowVersionId: string;
   correlationId: string | null;
   attemptCount: number;
@@ -69,6 +70,7 @@ export class PrismaRunStore implements RunStore {
       select: {
         id: true,
         workspaceId: true,
+        workflowId: true,
         workflowVersionId: true,
         correlationId: true,
         attemptCount: true,
@@ -101,6 +103,30 @@ export class PrismaRunStore implements RunStore {
       lastErrorCategory: error.category,
       errorMessage: error.message,
     });
+  }
+
+  /**
+   * A QUEUED run with a cancellation request is never claimed; finish it as CANCELLED.
+   * Returns whether this call cancelled it.
+   */
+  async cancelIfRequested(runId: string): Promise<boolean> {
+    const result = await this.prisma.workflowRun.updateMany({
+      where: { id: runId, status: RunStatus.QUEUED, cancelRequestedAt: { not: null } },
+      data: {
+        status: RunStatus.CANCELLED,
+        completedAt: new Date(),
+        lockedBy: null,
+        lastErrorCategory: 'CANCELLED',
+        errorMessage: 'Cancelled',
+      },
+    });
+    if (result.count === 1) {
+      await this.prisma.stepRun.updateMany({
+        where: { runId, status: { in: stepStatusesLeadingTo('SKIPPED') } },
+        data: { status: StepStatus.SKIPPED },
+      });
+    }
+    return result.count === 1;
   }
 
   /** QUEUED runs that may have missed their enqueue (DB committed, Redis call failed). */

@@ -40,6 +40,8 @@ export interface AttemptInfo {
   isFinalAttempt: boolean;
   /** Fencing token of the worker's run claim, passed to fenced store writes. */
   claim?: string;
+  /** Run-level log context (correlationId, workspaceId, jobId, ...) added to every log line. */
+  logFields?: Record<string, unknown>;
 }
 
 export type EngineOutcome = { status: 'SUCCEEDED' } | { status: 'CANCELLED' };
@@ -179,6 +181,12 @@ export class ExecutionEngine {
       return done.output;
     }
     const started = Date.now();
+    this.log(attempt, 'info', 'Step started', {
+      runId: run.id,
+      nodeKey: node.key,
+      nodeType: node.type,
+      stepAttempt,
+    });
     try {
       const result = await this.invoke(handler, {
         runId: run.id,
@@ -189,7 +197,7 @@ export class ExecutionEngine {
         outputs,
         idempotencyKey: `${run.id}:${node.key}`,
         attempt: stepAttempt,
-        logger: this.nodeLogger(run.id, node.key),
+        logger: this.nodeLogger(run.id, node.key, attempt),
       });
 
       const output = toPlainJson(result.output);
@@ -218,7 +226,7 @@ export class ExecutionEngine {
       } catch (completeErr) {
         return (await this.recordedSuccess(run.id, node.key, completeErr)).output;
       }
-      this.options.log?.('info', 'Step succeeded', {
+      this.log(attempt, 'info', 'Step succeeded', {
         runId: run.id,
         nodeKey: node.key,
         attempt: stepAttempt,
@@ -311,7 +319,7 @@ export class ExecutionEngine {
       ),
     );
     if (final) await bestEffort(this.store.skipRemaining(runId, attempt.claim));
-    this.options.log?.('warn', 'Step failed', {
+    this.log(attempt, 'warn', 'Step failed', {
       runId,
       nodeKey: node.key,
       errorCategory: classified.category,
@@ -324,11 +332,19 @@ export class ExecutionEngine {
       : new PermanentError(classified.category, classified.message);
   }
 
-  private nodeLogger(runId: string, nodeKey: string): NodeLogger {
-    const log = this.options.log;
+  private log(
+    attempt: AttemptInfo,
+    level: 'info' | 'warn',
+    message: string,
+    fields: Record<string, unknown>,
+  ): void {
+    this.options.log?.(level, message, { ...attempt.logFields, ...fields });
+  }
+
+  private nodeLogger(runId: string, nodeKey: string, attempt: AttemptInfo): NodeLogger {
     return {
-      info: (message, fields) => log?.('info', message, { runId, nodeKey, ...fields }),
-      warn: (message, fields) => log?.('warn', message, { runId, nodeKey, ...fields }),
+      info: (message, fields) => this.log(attempt, 'info', message, { ...fields, runId, nodeKey }),
+      warn: (message, fields) => this.log(attempt, 'warn', message, { ...fields, runId, nodeKey }),
     };
   }
 }

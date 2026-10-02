@@ -99,7 +99,7 @@ export class WebhookIntakeService {
 
     for (const runId of runIds) {
       await this.queue
-        .enqueue(runId)
+        .enqueue(runId, { correlationId, provider: slug, deliveryId })
         .catch((err: Error) =>
           this.logger.warn(
             { runId, error: err.message },

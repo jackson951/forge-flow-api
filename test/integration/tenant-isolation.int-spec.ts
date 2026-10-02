@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { PrismaService } from '../../src/infrastructure/prisma/prisma.service';
 import { bearer, registerUser, RegisteredUser } from '../support/auth';
 import { createTestApp } from '../support/create-app';
+import { createRun, createVersion } from '../support/factories';
 import { fillPath, listRoutes, RouteInfo } from '../support/routes';
 import { truncateAll } from '../support/test-database';
 
@@ -25,6 +26,7 @@ describe('Tenant isolation (integration)', () => {
   let bobWs: string;
   let workspaceRoutes: RouteInfo[];
   let bobWorkflowId: string;
+  let bobRunId: string;
 
   /**
    * Resource routes and a resource of Bob's to aim at them. Each later part adds its
@@ -32,6 +34,7 @@ describe('Tenant isolation (integration)', () => {
    */
   const foreignResources = (): { pattern: RegExp; param: string; id: string }[] => [
     { pattern: /\/workflows\/:id(\/|$)/, param: 'id', id: bobWorkflowId },
+    { pattern: /\/runs\/:id(\/|$)/, param: 'id', id: bobRunId },
   ];
 
   const paramValue = (name: string) =>
@@ -50,6 +53,7 @@ describe('Tenant isolation (integration)', () => {
       orderBy: { userId: 'asc' },
     }),
     workflows: await prisma.workflow.findMany({ where: { workspaceId }, orderBy: { id: 'asc' } }),
+    runs: await prisma.workflowRun.findMany({ where: { workspaceId }, orderBy: { id: 'asc' } }),
   });
 
   beforeAll(async () => {
@@ -74,6 +78,8 @@ describe('Tenant isolation (integration)', () => {
         .send({ name: "Bob's workflow" })
         .expect(201)
     ).body.id;
+    const bobVersion = await createVersion(prisma, { id: bobWorkflowId, workspaceId: bobWs });
+    bobRunId = (await createRun(prisma, bobVersion, { status: 'FAILED' })).id;
   });
 
   afterAll(() => app.close());
