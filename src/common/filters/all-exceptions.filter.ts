@@ -54,6 +54,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     const { status, message, details } = this.normalize(exception);
+    // e.g. QueueBusyException (Part 21): tells clients when to try again.
+    const retryAfter = (exception as { retryAfterSeconds?: unknown } | null)?.retryAfterSeconds;
+    if (status === 429 && typeof retryAfter === 'number' && !res.headersSent) {
+      res.setHeader('Retry-After', String(retryAfter));
+    }
 
     if (status >= 500) {
       this.logger.error(

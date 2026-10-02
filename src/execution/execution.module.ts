@@ -18,8 +18,10 @@ import { MicrosoftTokenManager } from '../modules/integrations/microsoft/microso
 import { createMicrosoftHandlers } from '../modules/integrations/microsoft/microsoft.node-types';
 import { SlackClient } from '../modules/integrations/slack/slack-client';
 import { createSlackHandlers } from '../modules/integrations/slack/slack.node-types';
+import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
 import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
+import { RetentionService } from './retention.service';
 import { RunWorkerService } from './run-worker.service';
 import { WorkerConnections } from './worker-connections';
 import { WorkerHeartbeat } from './worker-heartbeat.service';
@@ -65,13 +67,26 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
       useFactory: (handlers: NodeHandler[]) => new NodeHandlerRegistry(handlers),
     },
     {
+      provide: ProviderConcurrencyLimiter,
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService) =>
+        new ProviderConcurrencyLimiter(config.queue.providerConcurrency),
+    },
+    {
       provide: ExecutionEngine,
-      inject: [PrismaRunStore, NodeHandlerRegistry, AppConfigService, PinoLogger],
+      inject: [
+        PrismaRunStore,
+        NodeHandlerRegistry,
+        AppConfigService,
+        PinoLogger,
+        ProviderConcurrencyLimiter,
+      ],
       useFactory: (
         store: PrismaRunStore,
         registry: NodeHandlerRegistry,
         config: AppConfigService,
         logger: PinoLogger,
+        slots: ProviderConcurrencyLimiter,
       ) => {
         logger.setContext(ExecutionEngine.name);
         const resolver = createExpressionResolver((nodeKey, references) =>
@@ -79,17 +94,27 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         );
         return new ExecutionEngine(store, registry, resolver, {
           nodeTimeoutMs: config.queue.nodeTimeoutMs,
+          slots,
+          // 0.5–1.5 s, spread so postponed runs do not all return at once.
+          slotRetryDelayMs: () => 500 + Math.floor(Math.random() * 1_000),
           log: (level, message, fields) => logger[level](fields, message),
         });
       },
     },
     RunWorkerService,
     RunSweeper,
+    RetentionService,
     WorkflowRunProcessor,
     MaintenanceProcessor,
     WorkerHeartbeat,
   ],
-  exports: [NodeHandlerRegistry, RunSweeper, RunWorkerService],
+  exports: [
+    NodeHandlerRegistry,
+    RunSweeper,
+    RunWorkerService,
+    ProviderConcurrencyLimiter,
+    RetentionService,
+  ],
 })
 export class ExecutionModule implements OnModuleInit {
   constructor(

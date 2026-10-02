@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
+import { QueueBackpressure } from '../../infrastructure/queue/queue-backpressure.service';
 import { RunQueue } from '../../infrastructure/queue/run-queue.service';
 import {
   InboundWebhook,
@@ -25,6 +26,9 @@ import {
 
 export const MAX_EVENT_DATA_BYTES = 256 * 1024;
 const MAX_DELIVERY_ID_LENGTH = 200;
+/** Prisma's defaults are 2 s / 5 s. */
+const INTAKE_TX_MAX_WAIT_MS = 5_000;
+const INTAKE_TX_TIMEOUT_MS = 8_000;
 
 export type IntakeResult =
   | { accepted: true; duplicate: false; deliveryId: string; runs: number }
@@ -49,6 +53,7 @@ export class WebhookIntakeService {
     @Inject(WEBHOOK_PROVIDERS) providers: WebhookProvider[],
     private readonly prisma: PrismaService,
     private readonly queue: RunQueue,
+    private readonly backpressure: QueueBackpressure,
     private readonly logger: PinoLogger,
   ) {
     this.providers = new Map(providers.map((p) => [p.slug, p]));
@@ -83,8 +88,11 @@ export class WebhookIntakeService {
 
     let runIds: string[];
     try {
-      runIds = await this.prisma.$transaction((tx) =>
-        this.record(tx, provider, deliveryId, eventName, event, correlationId),
+      runIds = await this.prisma.$transaction(
+        (tx) => this.record(tx, provider, deliveryId, eventName, event, correlationId),
+        // Under a burst the pool can be busy for a moment. Waiting (well inside providers'
+        // ~10 s delivery timeout) beats a 500: GitHub does not redeliver on its own (Part 21).
+        { maxWait: INTAKE_TX_MAX_WAIT_MS, timeout: INTAKE_TX_TIMEOUT_MS },
       );
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -97,6 +105,9 @@ export class WebhookIntakeService {
       throw err;
     }
 
+    // Deliveries are always accepted, even under backpressure (the database is the buffer);
+    // a backlog only raises the alert.
+    if (runIds.length) await this.backpressure.observe();
     for (const runId of runIds) {
       await this.queue
         .enqueue(runId, { correlationId, provider: slug, deliveryId })

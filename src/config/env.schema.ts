@@ -12,6 +12,23 @@ const booleanString = z
 /** Durations such as "900s", "15m", "12h", "7d". */
 const duration = z.string().regex(/^\d+[smhd]$/, 'must look like 900s, 15m, 12h or 7d');
 
+/** Pool size when neither DATABASE_CONNECTION_LIMIT nor `connection_limit` is set. */
+export const DEFAULT_CONNECTION_LIMIT = 10;
+
+/** Effective Prisma pool size: the variable, else the URL parameter, else the default. */
+export function connectionLimit(databaseUrl: string, explicit?: number): number {
+  if (explicit) return explicit;
+  const fromUrl = Number(new URL(databaseUrl).searchParams.get('connection_limit'));
+  return Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : DEFAULT_CONNECTION_LIMIT;
+}
+
+/** DATABASE_URL with the effective `connection_limit` set. */
+export function databaseUrlWithPool(databaseUrl: string, explicit?: number): string {
+  const url = new URL(databaseUrl);
+  url.searchParams.set('connection_limit', String(connectionLimit(databaseUrl, explicit)));
+  return url.toString();
+}
+
 /** Prefix used by `.env.example` placeholders; never acceptable in production. */
 const PLACEHOLDER_PREFIX = 'change-me';
 
@@ -36,6 +53,14 @@ export const envSchema = z
     THROTTLE_ENABLED: booleanString,
 
     DATABASE_URL: z.string().url(),
+    /**
+     * Prisma pool size per process (Part 21). Overrides `connection_limit` in DATABASE_URL;
+     * with neither set the pool is DEFAULT_CONNECTION_LIMIT. Sizing: docs/backend/21-*.
+     */
+    DATABASE_CONNECTION_LIMIT: z.preprocess(
+      emptyAsUnset,
+      z.coerce.number().int().min(1).max(200).optional(),
+    ),
 
     REDIS_HOST: z.string().default('localhost'),
     REDIS_PORT: z.coerce.number().int().positive().default(6379),
@@ -57,6 +82,27 @@ export const envSchema = z
     /** QUEUED runs older than this are re-enqueued by the sweeper (lost-enqueue recovery). */
     SWEEPER_STALE_AFTER_MS: z.coerce.number().int().min(1_000).default(60_000),
     SWEEPER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
+    /**
+     * Steps of one provider (github, slack, microsoft, ai) running at once per worker
+     * process. Unset: half of WORKER_CONCURRENCY (rounded up), so a slow provider never
+     * occupies every slot.
+     */
+    PROVIDER_CONCURRENCY: z.preprocess(
+      emptyAsUnset,
+      z.coerce.number().int().min(1).max(100).optional(),
+    ),
+    /** Waiting jobs above which manual runs get 429 (webhooks are still accepted). 0 = off. */
+    QUEUE_BACKPRESSURE_THRESHOLD: z.coerce.number().int().min(0).default(5_000),
+
+    /** Retention (Part 21): a maintenance job deletes/trims expired history in batches. */
+    RETENTION_ENABLED: booleanString,
+    RETENTION_WEBHOOK_DELIVERY_DAYS: z.coerce.number().int().min(1).default(30),
+    RETENTION_STEP_PAYLOAD_DAYS: z.coerce.number().int().min(1).default(30),
+    RETENTION_RUN_DAYS: z.coerce.number().int().min(1).default(90),
+    RETENTION_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1_000),
+    /** Upper bound of batches per category per tick, so one tick never runs for long. */
+    RETENTION_MAX_BATCHES: z.coerce.number().int().min(1).max(1_000).default(50),
+    RETENTION_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
 
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_ACCESS_TTL: duration.default('15m'),
@@ -135,6 +181,25 @@ export const envSchema = z
           message: (err as Error).message,
         });
       }
+    }
+
+    if (env.RETENTION_STEP_PAYLOAD_DAYS > env.RETENTION_RUN_DAYS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RETENTION_STEP_PAYLOAD_DAYS'],
+        message: 'must not exceed RETENTION_RUN_DAYS',
+      });
+    }
+
+    // A worker needs one connection per concurrent run plus a little for the sweeper and
+    // retention jobs; fewer means runs queue for connections and time out (P2024).
+    const pool = connectionLimit(env.DATABASE_URL, env.DATABASE_CONNECTION_LIMIT);
+    if (pool < env.WORKER_CONCURRENCY + 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['DATABASE_CONNECTION_LIMIT'],
+        message: `pool of ${pool} is too small for WORKER_CONCURRENCY ${env.WORKER_CONCURRENCY}; use at least ${env.WORKER_CONCURRENCY + 2}`,
+      });
     }
 
     if (env.AI_PROVIDER === 'anthropic' && !env.AI_API_KEY) {
