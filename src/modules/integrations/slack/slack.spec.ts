@@ -159,13 +159,25 @@ describe('SlackClient', () => {
       expect(mapSlackHttpError(429, new Headers()).retryAfterMs).toBe(30_000);
     });
 
-    it('5xx and network failures are retryable', async () => {
-      mockFetch(new Response('', { status: 503 }), new TypeError('fetch failed'));
-      for (let i = 0; i < 2; i++) {
+    it('5xx and requests that never left (connection refused, DNS) are retryable', async () => {
+      const refused = new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+      const dns = new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } });
+      mockFetch(new Response('', { status: 503 }), refused, dns);
+      for (let i = 0; i < 3; i++) {
         const err = await client.postMessage(TOKEN, 'C1', 'x').catch((e) => e);
         expect(err).toBeInstanceOf(RetryableError);
         expect(err.category).toBe(ErrorCategory.TRANSIENT_INFRASTRUCTURE);
       }
+    });
+
+    it('a connection lost mid-request is uncertain when posting, retryable when reading (S4)', async () => {
+      const reset = () => new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } });
+      mockFetch(reset(), reset());
+      const post = await client.postMessage(TOKEN, 'C1', 'x').catch((e) => e);
+      expect(post).toBeInstanceOf(PermanentError);
+      expect(post.category).toBe(ErrorCategory.UNCERTAIN_OUTCOME);
+      const list = await client.listChannels(TOKEN).catch((e) => e);
+      expect(list).toBeInstanceOf(RetryableError);
     });
 
     it('a timeout while posting is UNCERTAIN_OUTCOME (not retried); while reading, retryable', async () => {

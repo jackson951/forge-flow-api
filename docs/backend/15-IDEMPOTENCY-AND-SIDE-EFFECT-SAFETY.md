@@ -1,6 +1,6 @@
 # 15 — Idempotency and Side-Effect Safety
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-02) — evidence below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -113,9 +113,82 @@ Already in place after Parts 07–08 (to be re-verified here): `jobId = runId`; 
 
 Handler classification table (fill in as handlers ship):
 
-| Handler | sideEffect | Provider idempotency key |
-| --- | --- | --- |
-| manual.trigger, condition, util.log | none | n/a (implemented in Part 08) |
-| ai.* | idempotent | n/a |
-| slack.sendMessage | non-idempotent | none available |
-| microsoft.todo.createTask | non-idempotent | none available |
+| Handler | sideEffect | Provider idempotency key | On a step found RUNNING after a crash |
+| --- | --- | --- | --- |
+| manual.trigger, condition, util.log | none | n/a | re-executed |
+| github.issue.created (trigger) | none | n/a | re-executed |
+| ai.summarize, ai.classify, ai.extract | idempotent | n/a (no external state; costs tokens) | re-executed |
+| slack.sendMessage | non-idempotent | none available (`chat.postMessage`) | UNCERTAIN_OUTCOME |
+| microsoft.todo.createTask | non-idempotent | none available (Graph To Do) | UNCERTAIN_OUTCOME |
+
+Enforced by `src/engine/execution/side-effects.spec.ts` (the table must match the code) and by the worker's startup check (a handler without a valid `sideEffect` stops the worker).
+
+## Delivery guarantees (reference)
+
+**FlowForge does not provide exactly-once execution.** It provides:
+
+- **at-least-once processing** of every accepted trigger (a committed run is eventually executed, even if Redis or a worker fails in between);
+- **deduplication at every boundary that has a key** (provider delivery id, run idempotency key, job id = run id, step state);
+- **at-most-once-after-uncertainty** for non-idempotent side effects: once FlowForge cannot know whether a Slack message was posted or a To Do task created, it stops and reports `UNCERTAIN_OUTCOME` instead of trying again. A side effect can be repeated only through an explicit manual retry that acknowledges the uncertainty.
+
+What is still possible, by design: a provider action happens but FlowForge records the step as `UNCERTAIN_OUTCOME` (it cannot know), and a human-approved retry repeats it.
+
+### How the guarantees are implemented
+
+| Mechanism | Where |
+| --- | --- |
+| Unique (provider, deliveryId); unique (workspaceId, idempotencyKey) | Part 09 schema + intake |
+| `jobId = runId`; sweeper re-enqueues QUEUED runs whose enqueue was lost | Part 07 |
+| **Run claim with fencing token**: `lockedBy = <worker>:<uuid>` per claim. QUEUED → RUNNING normally; RUNNING → RUNNING when a stalled job is redelivered. The newest claim owns the run; `startStep`, `failStep`, `skipRemaining` and run outcome writes require `lockedBy = claim` and otherwise throw `OwnershipLostError` — the superseded worker stops without writing | `PrismaRunStore`, `RunWorkerService`, `ExecutionEngine` |
+| RUNNING marker persisted (fenced) **before** a handler runs | `ExecutionEngine.runNode` |
+| Step found RUNNING on resume: idempotent → re-executed; non-idempotent → `UNCERTAIN_OUTCOME` | `ExecutionEngine` (Part 08) |
+| Overlap after redelivery: if a step write is refused because the other worker already recorded the step SUCCEEDED, its stored result is used | `ExecutionEngine.recordedSuccess` |
+| `completeStep` is not fenced: a worker that did the work records the truth even after losing the run | `RunStore` contract |
+| "Request not sent" (DNS, refused, unreachable, TLS) → retryable; timeout or connection lost mid-request → `UNCERTAIN_OUTCOME` for side effects, retryable for reads | `src/common/http/fetch-failure.ts`, Slack and Graph clients |
+| Non-idempotent step timeout → `UNCERTAIN_OUTCOME` | `ExecutionEngine.invoke` (Part 08) |
+| Provider `Retry-After` honoured by the queue | Part 13 backoff |
+| Job lock duration configurable (`WORKER_LOCK_DURATION_MS`, default 30 s): a crashed worker's job is redelivered after about that long | `src/execution/processors.ts`, `env.schema.ts` |
+| Manual retry: FAILED runs only, ADMIN only, same version and stored input, new keys, `Idempotency-Key` supported; **refused with 409 `UNCERTAIN_OUTCOME` unless `acknowledgeUncertainOutcome: true`**; `resumeFromFailedStep` copies SUCCEEDED steps (with their stored, sanitised outputs) so completed side effects are not repeated; audited as `run.retried` | `RunDispatcherService.retryRun`, `POST /api/v1/workspaces/:workspaceId/runs/:runId/retry` |
+
+### Decisions that differ from the original text
+
+- **Run claim from RUNNING is allowed** (the spec sketched `WHERE status IN ('QUEUED')`). Without it, a run whose worker crashed would stay RUNNING forever after its job is redelivered. Safety comes from the fencing token instead: only the newest claim can start steps or decide the outcome.
+- **"UI/API warns" on uncertain retries is implemented as a required acknowledgement** (409 until `acknowledgeUncertainOutcome: true`), so a duplicate can only follow a deliberate decision.
+- `resumeFromFailedStep` reuses **sanitised** outputs (credential-like values redacted at storage time, Part 17); a later step that needed such a value would see `[REDACTED]`. Retrying without resume re-executes everything.
+
+## Implementation Evidence
+
+Verified 2026-10-02 on branch `feat/part-15-idempotency` (from `main` at `c59d4d0`).
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint (0 warnings), typecheck, build | pass |
+| `npm test` | 526 passed (engine fencing and overlap tests in `execution-engine.spec.ts`, `side-effects.spec.ts`, `fetch-failure.spec.ts`) |
+| `npm run test:e2e` | 16 passed |
+| `npm run test:int` | 256 passed (13 in `test/integration/reliability.int-spec.ts`; the suite passed 3 consecutive runs) |
+
+### Acceptance criteria
+
+| ID | Scenario | Result | Evidence (`reliability.int-spec.ts` unless noted) |
+| --- | --- | --- | --- |
+| AC-15.1 | S1 duplicate webhook | PASS | Same delivery twice → 202 then 200 `duplicate: true`; 10 concurrent copies → one 202; one run each; side effect once per run |
+| AC-15.2 | S2 same job twice | PASS | Five runs, each processed by three workers at once: every side effect executed at most once (first step exactly once); runs end SUCCEEDED, or FAILED with `UNCERTAIN_OUTCOME` when an overlap made the outcome unknown — never a duplicate |
+| AC-15.3 | S3 crash after side effect, before recording | PASS | Worker hard-killed (BullMQ worker force-closed, lock not renewed) while the handler is past its provider call → job redelivered to a new worker → step FAILED `UNCERTAIN_OUTCOME` with the redelivery message, run FAILED, side effect recorded once; the killed worker's handler then returns and changes nothing (fenced) |
+| AC-15.4 | S4 timeouts | PASS | Non-idempotent step timeout → `UNCERTAIN_OUTCOME`, attempt 1, no retry; idempotent step timeout → retried, SUCCEEDED on attempt 2. Unit: refused/DNS → retryable; reset/timeout → uncertain for side effects (`fetch-failure.spec.ts`, `slack.spec.ts`) |
+| AC-15.5 | S5 worker restart | PASS | Hard kill mid idempotent step → redelivered, step re-executed, run SUCCEEDED, following side effect once. Graceful shutdown: existing AC-07.7 test |
+| AC-15.6 | S6 manual retry | PASS | MEMBER 403, non-FAILED 409, unknown 404; new run on the failed run's version (a newer version had been published) with the same input, `RETRY` + `retryOfRunId`, new idempotency key; `resumeFromFailedStep` → succeeded steps reused, side effect not repeated, audited; same `Idempotency-Key` → same run; uncertain run → 409 `{ code: 'UNCERTAIN_OUTCOME', nodeKeys }` until acknowledged |
+| AC-15.7 | S7 Redis/enqueue failure | PASS | Enqueue throws → API still 202, run stays QUEUED → sweeper re-enqueues → SUCCEEDED, side effect once (readiness reporting Redis down: Part 01 tests) |
+| AC-15.8 | S8 database transient error | PASS | `P1001` on the step's RUNNING marker → job retried (run attempt 2), step attempt 1 (first marker never persisted), provider called once |
+| AC-15.9 | Every handler declares sideEffect | PASS | Table above = code (`side-effects.spec.ts`); worker refuses to start on a missing/invalid `sideEffect` (unit) |
+| AC-15.10 | No exactly-once claim | PASS | "Delivery guarantees" section above |
+
+**Mutation checks** (each made tests fail, then reverted): removing the step fencing (S2 produced duplicate side effects); re-executing a non-idempotent step found RUNNING (S3); removing the retry acknowledgement (S6); removing the overlap tolerance (engine unit tests).
+
+### Found and fixed during this part
+
+- **Duplicate side effects when two workers process the same run** (stalled redelivery while the original worker is alive, or a duplicate job): both could move the step PENDING → RUNNING and call the provider. Fixed with per-claim fencing tokens.
+- **False failures after redelivery:** when the original and the redelivered worker both finished an idempotent step, the second write was an "illegal transition" and the run failed as INTERNAL (seen at both `completeStep` and `startStep`). Now the recorded success is reused.
+- **Network errors were not split into "not sent" and "maybe sent":** any non-timeout failure of `chat.postMessage` or a task creation was retried, which could duplicate a message after a connection reset. Now only failures before sending are retried.
+- **S3 test initially passed for the wrong reason:** the killed worker's own step timeout (1.5 s) produced `UNCERTAIN_OUTCOME` before the redelivery rule ran. The suite now uses a 5 s step timeout and asserts the redelivery rule's message; the mutation check then failed as expected.

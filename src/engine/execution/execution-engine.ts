@@ -4,10 +4,17 @@ import {
   parseDefinition,
   WorkflowDefinition,
 } from '../definition/definition.schema';
-import { classifyError, ExecutionError, PermanentError, RetryableError } from '../errors';
+import {
+  classifyError,
+  ExecutionError,
+  OwnershipLostError,
+  PermanentError,
+  RetryableError,
+} from '../errors';
 import { NodeHandlerRegistry } from './handler-registry';
 import { NodeHandler, NodeLogger, NodeResult } from './node-handler';
 import { RunSnapshot, RunStore, StepSnapshot } from './run-store';
+import { IllegalTransitionError } from './transitions';
 import { jsonByteLength, sanitizeForStorage, toPlainJson } from './sanitize';
 
 /** Turns a node's stored config into the config the handler receives (data mapping). */
@@ -31,6 +38,8 @@ export interface EngineOptions {
 export interface AttemptInfo {
   /** No further job retry will follow: retryable failures become final. */
   isFinalAttempt: boolean;
+  /** Fencing token of the worker's run claim, passed to fenced store writes. */
+  claim?: string;
 }
 
 export type EngineOutcome = { status: 'SUCCEEDED' } | { status: 'CANCELLED' };
@@ -89,7 +98,7 @@ export class ExecutionEngine {
     while (stack.length) {
       const node = stack.pop()!;
       if (await this.store.isCancelRequested(runId)) {
-        await this.store.skipRemaining(runId);
+        await this.store.skipRemaining(runId, attempt.claim);
         return { status: 'CANCELLED' };
       }
 
@@ -107,7 +116,7 @@ export class ExecutionEngine {
       for (const edge of [...next].reverse()) stack.push(graph.node(edge.to));
     }
 
-    await this.store.skipRemaining(runId);
+    await this.store.skipRemaining(runId, attempt.claim);
     return { status: 'SUCCEEDED' };
   }
 
@@ -155,7 +164,20 @@ export class ExecutionEngine {
       return this.fail(run.id, node, attempt, 0, err);
     }
 
-    const stepAttempt = await this.store.startStep(run.id, node.key, sanitizeForStorage(config));
+    // The RUNNING marker is persisted before the handler runs (fenced: a worker that lost the
+    // run never starts a step).
+    let stepAttempt: number;
+    try {
+      stepAttempt = await this.store.startStep(
+        run.id,
+        node.key,
+        sanitizeForStorage(config),
+        attempt.claim,
+      );
+    } catch (startErr) {
+      const done = await this.recordedSuccess(run.id, node.key, startErr);
+      return done.output;
+    }
     const started = Date.now();
     try {
       const result = await this.invoke(handler, {
@@ -187,11 +209,15 @@ export class ExecutionEngine {
         );
       }
 
-      await this.store.completeStep(run.id, node.key, {
-        sanitizedOutput: sanitizeForStorage(output),
-        durationMs: Date.now() - started,
-        externalRef: result.externalRef,
-      });
+      try {
+        await this.store.completeStep(run.id, node.key, {
+          sanitizedOutput: sanitizeForStorage(output),
+          durationMs: Date.now() - started,
+          externalRef: result.externalRef,
+        });
+      } catch (completeErr) {
+        return (await this.recordedSuccess(run.id, node.key, completeErr)).output;
+      }
       this.options.log?.('info', 'Step succeeded', {
         runId: run.id,
         nodeKey: node.key,
@@ -237,6 +263,22 @@ export class ExecutionEngine {
     }
   }
 
+  /**
+   * After a stalled job is redelivered, the original worker may still finish a step it was
+   * running. If a step write is refused because the step is already SUCCEEDED, the other
+   * worker recorded it first and its stored result counts. Any other refusal is rethrown.
+   */
+  private async recordedSuccess(
+    runId: string,
+    nodeKey: string,
+    err: unknown,
+  ): Promise<StepSnapshot> {
+    if (!(err instanceof IllegalTransitionError)) throw err;
+    const current = (await this.store.loadSteps(runId)).get(nodeKey);
+    if (current?.status !== 'SUCCEEDED') throw err;
+    return current;
+  }
+
   /** Records the failure on the step and throws a classified error. */
   private async fail(
     runId: string,
@@ -249,16 +291,26 @@ export class ExecutionEngine {
     const final = !classified.retryable || attempt.isFinalAttempt;
     // Each write is independent and best effort: the store itself may be what failed
     // (database down). The original error wins; a retried job finds the step RUNNING and
-    // resumes according to the side-effect rule.
-    await this.store
-      .failStep(runId, node.key, {
-        status: final ? 'FAILED' : 'RETRYING',
-        category: classified.category,
-        message: classified.message,
-        durationMs,
-      })
-      .catch(() => undefined);
-    if (final) await this.store.skipRemaining(runId).catch(() => undefined);
+    // resumes according to the side-effect rule. Losing the run to another worker is the
+    // exception: then this worker stops immediately.
+    const bestEffort = (write: Promise<void>) =>
+      write.catch((writeErr: unknown) => {
+        if (writeErr instanceof OwnershipLostError) throw writeErr;
+      });
+    await bestEffort(
+      this.store.failStep(
+        runId,
+        node.key,
+        {
+          status: final ? 'FAILED' : 'RETRYING',
+          category: classified.category,
+          message: classified.message,
+          durationMs,
+        },
+        attempt.claim,
+      ),
+    );
+    if (final) await bestEffort(this.store.skipRemaining(runId, attempt.claim));
     this.options.log?.('warn', 'Step failed', {
       runId,
       nodeKey: node.key,

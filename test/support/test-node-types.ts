@@ -81,6 +81,14 @@ const types: NodeTypeDefinition[] = [
     displayName: 'Records a non-idempotent call',
     configSchema: z.object({ label: z.string() }).strict(),
   },
+  {
+    // Performs its side effect, then waits at the gate: lets tests crash or time out a
+    // worker *after* the provider acted but before the result was recorded.
+    type: 'test.slowSideEffect',
+    kind: 'ACTION',
+    displayName: 'Records a non-idempotent call, then waits',
+    configSchema: z.object({ label: z.string() }).strict(),
+  },
 ];
 
 export function testHandlers(control: TestNodeControl): NodeHandler[] {
@@ -146,6 +154,16 @@ export function testHandlers(control: TestNodeControl): NodeHandler[] {
       execute: async ({ config, idempotencyKey }) => {
         control.sideEffects.push(`${config.label as string}@${idempotencyKey}`);
         return { output: { sent: true }, externalRef: `ref-${control.sideEffects.length}` };
+      },
+    },
+    {
+      type: 'test.slowSideEffect',
+      kind: 'ACTION',
+      sideEffect: 'non-idempotent',
+      execute: async ({ config, idempotencyKey }) => {
+        control.sideEffects.push(`${config.label as string}@${idempotencyKey}`);
+        await control.waitAtGate();
+        return { output: { sent: true } };
       },
     },
   ];

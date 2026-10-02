@@ -14,8 +14,17 @@ import { RunWorkerService } from './run-worker.service';
  * Lock renewal keeps long steps owned; a job whose worker dies stalls and is redelivered
  * once (maxStalledCount 1), then resumes per the engine's side-effect rules.
  */
+/**
+ * How long a job's lock lives without renewal; a job whose worker stops renewing it (crash)
+ * is redelivered after about this long. Read when the processor is defined (BullMQ fixes lock
+ * settings at construction); validated with the rest of the environment.
+ */
+const LOCK_DURATION_MS = Number(process.env.WORKER_LOCK_DURATION_MS) || 30_000;
+
 @Processor(QUEUES.WORKFLOW_RUNS, {
   maxStalledCount: 1,
+  lockDuration: LOCK_DURATION_MS,
+  stalledInterval: LOCK_DURATION_MS,
   settings: { backoffStrategy: runBackoffStrategy },
 })
 export class WorkflowRunProcessor extends WorkerHost implements OnApplicationBootstrap {
