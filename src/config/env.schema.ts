@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { parseKeyring } from '../infrastructure/crypto/envelope';
 
+/** Treats an empty variable (`KEY=` in .env) as unset. */
+const emptyAsUnset = (v: unknown) => (v === '' ? undefined : v);
+
 const booleanString = z
   .enum(['true', 'false'])
   .transform((v) => v === 'true')
@@ -86,9 +89,17 @@ export const envSchema = z
     /** Enables the non-production `test` webhook provider (Part 09). Ignored in production. */
     WEBHOOK_TEST_SECRET: z.string().min(16).optional(),
 
+    /**
+     * AI steps (Part 12). Unset: ai.* nodes cannot be published. "fake" is a deterministic
+     * provider for tests and local demos (not allowed in production).
+     */
+    AI_PROVIDER: z.preprocess(emptyAsUnset, z.enum(['anthropic', 'fake']).optional()),
     AI_API_KEY: z.string().optional(),
-    AI_MODEL: z.string().optional(),
+    AI_API_URL: z.string().url().default('https://api.anthropic.com'),
+    AI_MODEL: z.preprocess(emptyAsUnset, z.string().default('claude-haiku-4-5-20251001')),
     AI_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+    AI_MAX_INPUT_CHARS: z.coerce.number().int().min(1_000).max(200_000).default(20_000),
+    AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(8_192).default(1_024),
   })
   .superRefine((env, ctx) => {
     if (env.ENCRYPTION_KEYS) {
@@ -111,7 +122,23 @@ export const envSchema = z
       }
     }
 
+    if (env.AI_PROVIDER === 'anthropic' && !env.AI_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AI_API_KEY'],
+        message: 'required when AI_PROVIDER is "anthropic"',
+      });
+    }
+
     if (env.NODE_ENV !== 'production') return;
+
+    if (env.AI_PROVIDER === 'fake') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AI_PROVIDER'],
+        message: 'the fake AI provider is not allowed in production',
+      });
+    }
 
     if ((env.SLACK_CLIENT_ID || env.MICROSOFT_CLIENT_ID) && !env.ENCRYPTION_KEYS) {
       ctx.addIssue({

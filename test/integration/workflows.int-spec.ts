@@ -385,9 +385,14 @@ describe('Workflow management (integration)', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual(
         expect.arrayContaining([
-          { type: 'manual.trigger', kind: 'TRIGGER', displayName: 'Manual trigger' },
-          { type: 'condition', kind: 'CONDITION', displayName: 'Condition' },
-          { type: 'util.log', kind: 'ACTION', displayName: 'Log message' },
+          {
+            type: 'manual.trigger',
+            kind: 'TRIGGER',
+            displayName: 'Manual trigger',
+            available: true,
+          },
+          { type: 'condition', kind: 'CONDITION', displayName: 'Condition', available: true },
+          { type: 'util.log', kind: 'ACTION', displayName: 'Log message', available: true },
         ]),
       );
     });

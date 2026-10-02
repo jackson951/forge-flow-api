@@ -28,6 +28,11 @@ export interface NodeTypeDefinition {
    * CONNECTED connection of this provider in the workflow's own workspace (checked on publish).
    */
   connectionProvider?: IntegrationProviderKey;
+  /**
+   * Set when this server cannot run the node type (e.g. no AI provider configured): drafts
+   * may contain it, but publishing fails with PROVIDER_NOT_CONFIGURED.
+   */
+  unavailableReason?: string;
 }
 
 // ── Built-in node types ──────────────────────────────────────────────────────

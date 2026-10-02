@@ -8,7 +8,6 @@ import { createValidationPipe } from './common/pipes/validation.pipe';
 import { AppConfigService } from './config/app-config.service';
 import { CoreModule } from './core/core.module';
 import { AuditModule } from './modules/audit/audit.module';
-import { AiModule } from './modules/ai/ai.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
@@ -40,7 +39,6 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     IntegrationsModule,
     WebhooksModule,
     DashboardModule,
-    AiModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
