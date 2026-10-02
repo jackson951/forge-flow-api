@@ -10,6 +10,15 @@ export interface ConnectionDetails {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
+/**
+ * Result of completing a connection: the public details plus, for providers that act with a
+ * stored token (Slack), the credential. The credential is encrypted by the CredentialStore in
+ * the same transaction that saves the connection and is never returned to callers.
+ */
+export interface CompletedConnection extends ConnectionDetails {
+  credential?: Credential;
+}
+
 /** Thrown by providers when the user may not connect this account (shown as a generic error). */
 export class ConnectionDeniedError extends Error {
   constructor(
@@ -33,7 +42,7 @@ export interface IntegrationProvider {
   isConfigured(): boolean;
   connectUrl(state: string): string;
   /** Called with the callback query after `state` was verified and consumed. */
-  completeConnection(query: Record<string, string | undefined>): Promise<ConnectionDetails>;
+  completeConnection(query: Record<string, string | undefined>): Promise<CompletedConnection>;
   /** Best-effort revocation at the provider on disconnect (if the provider supports it). */
   revoke?(credential: Credential): Promise<void>;
 }

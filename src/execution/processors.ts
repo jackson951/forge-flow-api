@@ -4,6 +4,7 @@ import { Job, Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../config/app-config.service';
 import { ExecuteRunJobData, JOBS, QUEUES } from '../infrastructure/queue/queue.constants';
+import { runBackoffStrategy } from '../infrastructure/queue/retry-backoff';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
 import { PrismaRunStore } from './prisma-run-store';
 import { RunWorkerService } from './run-worker.service';
@@ -13,7 +14,10 @@ import { RunWorkerService } from './run-worker.service';
  * Lock renewal keeps long steps owned; a job whose worker dies stalls and is redelivered
  * once (maxStalledCount 1), then resumes per the engine's side-effect rules.
  */
-@Processor(QUEUES.WORKFLOW_RUNS, { maxStalledCount: 1 })
+@Processor(QUEUES.WORKFLOW_RUNS, {
+  maxStalledCount: 1,
+  settings: { backoffStrategy: runBackoffStrategy },
+})
 export class WorkflowRunProcessor extends WorkerHost implements OnApplicationBootstrap {
   constructor(
     private readonly runs: RunWorkerService,

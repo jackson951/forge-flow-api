@@ -11,22 +11,35 @@ import { NODE_HANDLERS, NodeHandler } from '../engine/execution/node-handler';
 import { AI_PROVIDER, AiProvider } from '../modules/ai/ai-provider';
 import { AiModule } from '../modules/ai/ai.module';
 import { createAiHandlers } from '../modules/ai/ai.node-types';
+import { CredentialStore } from '../modules/integrations/credentials/credential-store';
 import { GITHUB_HANDLERS } from '../modules/integrations/github/github.node-types';
+import { SlackClient } from '../modules/integrations/slack/slack-client';
+import { createSlackHandlers } from '../modules/integrations/slack/slack.node-types';
 import { PrismaRunStore } from './prisma-run-store';
 import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
 import { RunWorkerService } from './run-worker.service';
+import { WorkerConnections } from './worker-connections';
 
 /** Worker-only: the engine, its handlers and the queue processors. */
 @Module({
   imports: [EngineModule, AiModule],
   providers: [
     PrismaRunStore,
+    CredentialStore,
+    SlackClient,
+    WorkerConnections,
     {
       provide: NODE_HANDLERS,
-      inject: [AI_PROVIDER, AppConfigService],
-      useFactory: (ai: AiProvider | null, config: AppConfigService): NodeHandler[] => [
+      inject: [AI_PROVIDER, AppConfigService, SlackClient, WorkerConnections],
+      useFactory: (
+        ai: AiProvider | null,
+        config: AppConfigService,
+        slack: SlackClient,
+        connections: WorkerConnections,
+      ): NodeHandler[] => [
         ...BUILT_IN_HANDLERS,
         ...GITHUB_HANDLERS,
+        ...createSlackHandlers(slack, connections),
         ...createAiHandlers(ai, config.ai),
       ],
     },

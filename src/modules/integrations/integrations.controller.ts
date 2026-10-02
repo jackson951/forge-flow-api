@@ -21,6 +21,7 @@ import { IntegrationProviderKey } from '@prisma/client';
 import { Response } from 'express';
 import { CurrentWorkspace, Public, RequireRole } from '../../common/decorators';
 import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
+import { SlackChannelsQueryDto } from './dto/slack-channels-query.dto';
 import { IntegrationsService } from './integrations.service';
 
 const providerPipe = new ParseEnumPipe(IntegrationProviderKey);
@@ -55,6 +56,21 @@ export class IntegrationsController {
     @Param('connectionId', ParseUUIDPipe) connectionId: string,
   ) {
     return this.integrations.listGitHubRepositories(ws.workspaceId, connectionId);
+  }
+
+  /** Slack channels the bot can post to (for action configuration). IDs and names only. */
+  @Get(':connectionId/slack/channels')
+  slackChannels(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Query() query: SlackChannelsQueryDto,
+  ) {
+    return this.integrations.listSlackChannels(
+      ws.workspaceId,
+      connectionId,
+      query.cursor,
+      query.limit,
+    );
   }
 
   @RequireRole('ADMIN')

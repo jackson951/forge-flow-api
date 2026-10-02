@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule, TestingModuleBuilder } from '@nestjs/testing';
 import { NodeTypeCatalog } from '../../src/engine/catalog/node-type-catalog';
 import { NodeHandlerRegistry } from '../../src/engine/execution/handler-registry';
 import { WorkerModule } from '../../src/worker.module';
@@ -8,8 +8,11 @@ import { registerTestHandlers, registerTestTypes, TestNodeControl } from './test
  * Boots the real WorkerModule in-process (BullMQ processors start on init), with the
  * test node types registered before the handler/catalog consistency check runs.
  */
-export async function createTestWorker(control: TestNodeControl): Promise<TestingModule> {
-  const worker = await Test.createTestingModule({ imports: [WorkerModule] }).compile();
+export async function createTestWorker(
+  control: TestNodeControl,
+  customize: (builder: TestingModuleBuilder) => TestingModuleBuilder = (b) => b,
+): Promise<TestingModule> {
+  const worker = await customize(Test.createTestingModule({ imports: [WorkerModule] })).compile();
   registerTestTypes(worker.get(NodeTypeCatalog));
   registerTestHandlers(worker.get(NodeHandlerRegistry), control);
   await worker.init();
