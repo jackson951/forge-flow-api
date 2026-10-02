@@ -1,6 +1,6 @@
 # 10 — GitHub Integration
 
-**Status:** BLOCKED (2026-10-02) — everything implemented and verified except AC-10.1 (a real event from github.com), which needs a registered GitHub App. See the setup guide below; see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
+**Status:** COMPLETE (2026-10-02) — all criteria verified, AC-10.1 with real github.com events (evidence below); see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -157,7 +157,7 @@ Verified 2026-10-02 on branch `feat/part-11-09-conditions-and-webhooks` (togethe
 
 | ID | Result | Evidence |
 | --- | --- | --- |
-| AC-10.1 | **BLOCKED** — verified with a simulated GitHub only | A signed, real-format `issues.opened` payload for the connected installation runs the published workflow end to end (condition on labels, mapped message `Prod issue #42: Login page crashes`). A real event from github.com still needs your GitHub App (setup guide above) |
+| AC-10.1 | PASS | Real github.com events, 2026-10-02 (see "Live verification" below): issue #12 in `jackson951/forge-flow-api` → run `e0c8cae1-02fb-4245-9f87-4a1c6cf0fd96` SUCCEEDED, label condition true, message `Bug issue #12: BUg test`. Also covered by the simulated end-to-end integration test |
 | AC-10.2 | PASS | Unit: wrong secret and tampered body rejected; integration: 401 |
 | AC-10.3 | PASS | Same `X-GitHub-Delivery` twice → one run, second response `duplicate: true` |
 | AC-10.4 | PASS | All responses in the suite scanned: no client secret, webhook secret, private key, `ghu_`/`ghs_` tokens. DB: no `IntegrationCredential` rows, OAuth state stored only as a hash. Logs: suite re-run at info level (126 JSON lines) contains none of them; all `authorization` and `x-hub-signature-256` header values are `[REDACTED]` |
@@ -170,6 +170,34 @@ Verified 2026-10-02 on branch `feat/part-11-09-conditions-and-webhooks` (togethe
 
 - **Security fix beyond the spec:** without the publish-time connection check, a user could paste another workspace's `connectionId` and receive that workspace's GitHub events. Now refused with `CONNECTION_INVALID`, and the webhook pipeline additionally requires the event's installation to match the trigger's connection.
 - The same installation may be connected to several workspaces, but each binding requires a user who can access that installation.
-- **Not verified against github.com:** whether GitHub forwards the `state` parameter through the install-with-OAuth redirect exactly as assumed. This is checked as part of AC-10.1.
+- **Verified against github.com:** GitHub forwards `state` through the install-with-OAuth redirect together with `code`, `installation_id` and `setup_action=install` (live callback, 2026-10-02).
 - Optional `github.issue.addComment` action not implemented (not needed for the flagship workflow).
 - Disconnect only unbinds the connection in FlowForge; uninstalling the app is done on GitHub.
+
+## Live verification (2026-10-02)
+
+Real GitHub App `flowforge-dev-jackson` (Issues and Metadata read-only, subscribed to Issues), webhooks delivered through an ngrok tunnel to a locally running API (`node dist/main`) and worker (`node dist/worker`) built from `main` at `c83c6c0`, dev database.
+
+| Step | Result |
+| --- | --- |
+| App credentials | App JWT accepted by `GET /app`; slug and client id match `.env` |
+| Connect | `POST /workspaces/:id/integrations/GITHUB/connect` → install URL; installing on `jackson951/forge-flow-api` redirected to the callback with `code`, `installation_id`, `setup_action=install` and `state` → 302 `status=connected`; connection `2e43f5b0-…` CONNECTED, `externalAccountId` = installation `167139145`, account `jackson951` |
+| Publish | Workflow `github.issue.created` (that connection and repository) → condition `trigger.issue.labels contains "bug"` → two `util.log` branches; published (connection check passed) |
+| Event 1 | Issue #11 → delivery `issues.opened` PROCESSED → run `7195e623-9238-4501-ac23-5c6bfdd40ff1` SUCCEEDED. Version 1 of the test workflow used wrong reference paths (`trigger.labels` instead of `trigger.issue.labels`), so the branch and message were wrong — a test-workflow mistake, corrected in version 2, not a backend defect |
+| Event 2 | Issue #12 with label `bug` → delivery `issues.opened` PROCESSED → run `e0c8cae1-02fb-4245-9f87-4a1c6cf0fd96` SUCCEEDED: `has_bug_label` → `{ result: true }`, `bug` → `Bug issue #12: BUg test`, `other` SKIPPED. Idempotency key `GITHUB:<X-GitHub-Delivery>:<workflowId>` |
+| Other events | `installation.created/deleted`, `issues.assigned`, `issues.labeled` recorded as IGNORED, no runs |
+| Logs | API + worker logs contain neither the webhook secret, client secret, private key nor any `ghs_`/`ghu_` token; all `x-hub-signature-256` values `[REDACTED]` |
+
+### Found and fixed during live verification
+
+- **OAuth `code` and `state` were written to request logs** (callback URL and `req.query` in the pino-http request log). The code is single-use and was already exchanged, but secrets must not reach logs (Part 17). The request serializer now redacts sensitive query parameters (`code`, `state`, `token`, `access_token`, `client_secret`, `signature`, …) in `req.url` and `req.query` (`src/common/utils/redact.ts`, `src/infrastructure/logger/logger.module.ts`). Tests: a real HTTP request through pino-http with the app's options, plus `redactQueryString` cases. Verified on the restarted live API: a callback with canary values logs `code=[REDACTED]` and `state=[REDACTED]`.
+- Setup note: GitHub only redirects to the callback when **Request user authorization (OAuth) during installation** is enabled; otherwise the installer stays on GitHub and no connection is created (seen during setup; the guide above already requires it).
+
+### Command results (branch `feat/part-10-github-live`)
+
+| Command | Result |
+| --- | --- |
+| prettier check, lint (0 warnings), typecheck, build | pass |
+| `npm test` | 444 passed |
+| `npm run test:e2e` | 16 passed |
+| `npm run test:int` | 211 passed |
