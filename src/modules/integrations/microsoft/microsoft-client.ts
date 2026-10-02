@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCategory } from '@prisma/client';
+import { providerNetworkError } from '../../../common/http/fetch-failure';
 import { AppConfigService } from '../../../config/app-config.service';
 import { ExecutionError, PermanentError, RetryableError } from '../../../engine/errors';
 
@@ -283,7 +284,12 @@ export class MicrosoftClient {
       const body = (await res.json().catch(() => ({}))) as { error?: { code?: unknown } };
       throw mapGraphError(res.status, res.headers, body.error?.code, requestId);
     }
-    return { body: (await res.json()) as T, requestId };
+    try {
+      return { body: (await res.json()) as T, requestId };
+    } catch (err) {
+      // Success status but the body was cut off: the action happened (or may have).
+      throw networkError(err, sideEffect, 'Microsoft Graph');
+    }
   }
 }
 
@@ -305,18 +311,9 @@ const retryAfterMs = (headers: Headers) => {
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
 };
 
-function networkError(err: unknown, sideEffect: boolean, what: string): ExecutionError {
-  const name = (err as Error)?.name;
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return sideEffect
-      ? new PermanentError(
-          ErrorCategory.UNCERTAIN_OUTCOME,
-          `${what} did not answer in time; the task may have been created, so it is not retried automatically`,
-        )
-      : new RetryableError(ErrorCategory.PROVIDER_TIMEOUT, `${what} did not respond in time`);
-  }
-  return new RetryableError(ErrorCategory.TRANSIENT_INFRASTRUCTURE, `Could not reach ${what}`);
-}
+/** Not sent → retryable; timeout / lost mid-request on a side effect → UNCERTAIN_OUTCOME. */
+const networkError = (err: unknown, sideEffect: boolean, provider: string): ExecutionError =>
+  providerNetworkError(err, { provider, sideEffect });
 
 /**
  * Token endpoint errors (OAuth 2.0 `error` codes). `invalid_grant` means the user's refresh

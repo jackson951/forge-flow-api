@@ -26,6 +26,18 @@ export class PermanentError extends ExecutionError {
   readonly retryable = false;
 }
 
+/**
+ * The run was claimed by another worker since this one started (its job was considered
+ * stalled and redelivered). The newest claim owns the run; this worker must stop without
+ * writing anything else. Not an ExecutionError: it says nothing about the run's outcome.
+ */
+export class OwnershipLostError extends Error {
+  constructor(readonly runId: string) {
+    super(`Run ${runId} was claimed by another worker`);
+    this.name = 'OwnershipLostError';
+  }
+}
+
 export interface ClassifiedError {
   category: ErrorCategory;
   retryable: boolean;

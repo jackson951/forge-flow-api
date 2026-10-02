@@ -1,4 +1,5 @@
 import { StepStatus } from '@prisma/client';
+import { OwnershipLostError } from '../../errors';
 import { PlannedStep, RunSnapshot, RunStore, StepFailure, StepSnapshot } from '../run-store';
 import { canTransitionStep, IllegalTransitionError } from '../transitions';
 
@@ -15,6 +16,8 @@ export interface MemoryStep extends StepSnapshot {
 export class InMemoryRunStore implements RunStore {
   readonly steps = new Map<string, MemoryStep>();
   cancelRequested = false;
+  /** Current run claim; fenced writes with another claim throw OwnershipLostError. */
+  owner?: string;
 
   constructor(private readonly run: Omit<RunSnapshot, 'cancelRequested'>) {}
 
@@ -45,7 +48,13 @@ export class InMemoryRunStore implements RunStore {
     return new Map([...this.steps].map(([k, v]) => [k, { ...v }]));
   }
 
-  async startStep(_runId: string, nodeKey: string, input: unknown): Promise<number> {
+  async startStep(
+    _runId: string,
+    nodeKey: string,
+    input: unknown,
+    claim?: string,
+  ): Promise<number> {
+    this.fence(claim);
     const step = this.transition(nodeKey, 'RUNNING');
     step.attemptCount += 1;
     step.input = input;
@@ -62,15 +71,28 @@ export class InMemoryRunStore implements RunStore {
     step.externalRef = result.externalRef;
   }
 
-  async failStep(_runId: string, nodeKey: string, failure: StepFailure): Promise<void> {
+  async failStep(
+    _runId: string,
+    nodeKey: string,
+    failure: StepFailure,
+    claim?: string,
+  ): Promise<void> {
+    this.fence(claim);
     const step = this.transition(nodeKey, failure.status);
     step.errorCategory = failure.category;
     step.errorMessage = failure.message;
   }
 
-  async skipRemaining(): Promise<void> {
+  async skipRemaining(_runId?: string, claim?: string): Promise<void> {
+    this.fence(claim);
     for (const step of this.steps.values()) {
       if (step.status === 'PENDING' || step.status === 'RETRYING') step.status = 'SKIPPED';
+    }
+  }
+
+  private fence(claim?: string): void {
+    if (claim !== undefined && this.owner !== undefined && claim !== this.owner) {
+      throw new OwnershipLostError(this.run.id);
     }
   }
 

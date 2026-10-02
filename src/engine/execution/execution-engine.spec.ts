@@ -1,6 +1,6 @@
 import { ErrorCategory } from '@prisma/client';
 import { EdgeDefinition, NodeDefinition } from '../definition/definition.schema';
-import { PermanentError, RetryableError } from '../errors';
+import { OwnershipLostError, PermanentError, RetryableError } from '../errors';
 import { BUILT_IN_HANDLERS } from './built-in-handlers';
 import { ExecutionEngine, identityResolver, ValueResolver } from './execution-engine';
 import { NodeHandlerRegistry } from './handler-registry';
@@ -370,6 +370,109 @@ describe('ExecutionEngine', () => {
       });
       expect(calls).toEqual([]);
       expect(store.states()).toMatchObject({ a: 'FAILED', b: 'SKIPPED' });
+    });
+  });
+
+  describe('fencing: a worker that lost the run (Part 15)', () => {
+    it('never starts a step once another worker owns the run', async () => {
+      const { engine, store, calls } = setup([node('a')], [edge('trigger', 'a')], {
+        sideEffect: 'non-idempotent',
+      });
+      store.owner = 'worker-B';
+      await expect(
+        engine.execute(RUN, { isFinalAttempt: false, claim: 'worker-A' }),
+      ).rejects.toBeInstanceOf(OwnershipLostError);
+      expect(calls).toEqual([]);
+      expect(store.states()).toEqual({ trigger: 'PENDING', a: 'PENDING' });
+    });
+
+    it('stops at the next step when the run is taken over mid-execution', async () => {
+      const ctx = setup([node('a'), node('b')], [edge('trigger', 'a'), edge('a', 'b')], {
+        sideEffect: 'non-idempotent',
+        behave: {
+          a: async () => {
+            ctx.store.owner = 'worker-B'; // redelivered to another worker while "a" ran
+            return { done: true };
+          },
+        },
+      });
+      const { store } = ctx;
+      store.owner = 'worker-A';
+      await expect(
+        ctx.engine.execute(RUN, { isFinalAttempt: false, claim: 'worker-A' }),
+      ).rejects.toBeInstanceOf(OwnershipLostError);
+      // "a" finished and records the truth; "b" is never started by the old worker.
+      expect(ctx.calls).toEqual(['a']);
+      expect(store.states()).toMatchObject({ a: 'SUCCEEDED', b: 'PENDING' });
+    });
+
+    it('a failure write by a superseded worker is refused and surfaces as OwnershipLostError', async () => {
+      const ctx = setup([node('a')], [edge('trigger', 'a')], {
+        behave: {
+          a: async () => {
+            ctx.store.owner = 'worker-B';
+            throw new PermanentError(ErrorCategory.PERMANENT_PROVIDER_ERROR, 'nope');
+          },
+        },
+      });
+      const { store } = ctx;
+      store.owner = 'worker-A';
+      await expect(
+        ctx.engine.execute(RUN, { isFinalAttempt: true, claim: 'worker-A' }),
+      ).rejects.toBeInstanceOf(OwnershipLostError);
+      expect(store.states()).toMatchObject({ a: 'RUNNING' }); // left for the new owner
+    });
+  });
+
+  describe('redelivery overlap: the old worker finishes a step too (Part 15)', () => {
+    /** Simulates the original worker recording success for `key` with `output`. */
+    const finishedElsewhere = (store: InMemoryRunStore, key: string, output: unknown) => {
+      const step = store.steps.get(key)!;
+      step.status = 'SUCCEEDED';
+      step.output = output;
+    };
+
+    it('completing a step the other worker already recorded reuses their result', async () => {
+      const ctx = setup([node('a'), node('b')], [edge('trigger', 'a'), edge('a', 'b')], {
+        behave: {
+          a: async () => {
+            finishedElsewhere(ctx.store, 'a', { from: 'other-worker' });
+            return { from: 'this-worker' };
+          },
+        },
+      });
+      const { store } = ctx;
+      await expect(ctx.engine.execute(RUN, notLast)).resolves.toEqual({ status: 'SUCCEEDED' });
+      expect(store.states()).toMatchObject({ a: 'SUCCEEDED', b: 'SUCCEEDED' });
+      expect(store.steps.get('a')!.output).toEqual({ from: 'other-worker' });
+      expect(store.steps.get('b')!.output).toMatchObject({ seen: ['trigger', 'a'] });
+    });
+
+    it('starting a step the other worker finished meanwhile skips it and reuses the result', async () => {
+      const ctx = setup([node('a'), node('b')], [edge('trigger', 'a'), edge('a', 'b')]);
+      const { store } = ctx;
+      const startStep = store.startStep.bind(store);
+      jest.spyOn(store, 'startStep').mockImplementation(async (runId, key, input, claim) => {
+        if (key === 'a') finishedElsewhere(store, 'a', { from: 'other-worker' });
+        return startStep(runId, key, input, claim);
+      });
+      await expect(ctx.engine.execute(RUN, notLast)).resolves.toEqual({ status: 'SUCCEEDED' });
+      expect(ctx.calls).toEqual(['b']); // "a" was not executed again
+      expect(store.steps.get('a')!.output).toEqual({ from: 'other-worker' });
+    });
+
+    it('other illegal transitions are still errors', async () => {
+      const ctx = setup([node('a')], [edge('trigger', 'a')], {
+        behave: {
+          a: async () => {
+            ctx.store.steps.get('a')!.status = 'FAILED';
+            return {};
+          },
+        },
+      });
+      await expect(ctx.engine.execute(RUN, lastAttempt)).rejects.toMatchObject({
+        category: ErrorCategory.INTERNAL,
+      });
     });
   });
 
