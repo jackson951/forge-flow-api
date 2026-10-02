@@ -37,9 +37,12 @@ export class RunWorkerService {
     const attempt = job.attemptsMade + 1;
     const claimed = await this.store.claimRun(runId, this.workerId);
     if (!claimed) {
+      const cancelled = await this.store.cancelIfRequested(runId);
       this.logger.info(
         { runId, jobId: job.jobId, attempt },
-        'Run not claimable (finished or cancelled); skipping',
+        cancelled
+          ? 'Run cancelled before it started'
+          : 'Run not claimable (finished or cancelled); skipping',
       );
       return;
     }
@@ -49,6 +52,7 @@ export class RunWorkerService {
       jobId: job.jobId,
       attempt,
       workspaceId: claimed.workspaceId,
+      workflowId: claimed.workflowId,
       workflowVersionId: claimed.workflowVersionId,
       correlationId: claimed.correlationId,
     };
@@ -58,7 +62,11 @@ export class RunWorkerService {
 
     const { claim } = claimed;
     try {
-      const outcome = await this.engine.execute(runId, { isFinalAttempt, claim });
+      const outcome = await this.engine.execute(runId, {
+        isFinalAttempt,
+        claim,
+        logFields: fields,
+      });
       await this.store.finishRun(runId, outcome.status, claim);
       this.logger.info(
         { ...fields, status: outcome.status, durationMs: Date.now() - started },
@@ -75,6 +83,13 @@ export class RunWorkerService {
       };
 
       try {
+        // A retry would put the run back in QUEUED, where a cancelled run is never claimed.
+        if (!final && (await this.store.isCancelRequested(runId))) {
+          await this.store.skipRemaining(runId, claim);
+          await this.store.finishRun(runId, 'CANCELLED', claim);
+          this.logger.info(logFields, 'Run cancelled instead of retried');
+          return;
+        }
         if (final) await this.store.failRun(runId, error, claim);
         else await this.store.requeueRun(runId, error, claim);
       } catch (persistErr) {

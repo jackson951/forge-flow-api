@@ -115,7 +115,7 @@ export class RunDispatcherService {
       return { runId: existing.id, status: existing.status };
     }
 
-    await this.enqueue(run.id);
+    await this.enqueue(run.id, { workspaceId, workflowId, correlationId: request.correlationId });
     this.logger.info({ runId: run.id, workflowId, workflowVersionId: version.id }, 'Run queued');
     return { runId: run.id, status: run.status };
   }
@@ -251,7 +251,11 @@ export class RunDispatcherService {
       };
     }
 
-    await this.enqueue(created.id);
+    await this.enqueue(created.id, {
+      workspaceId,
+      workflowId: original.workflowId,
+      correlationId: request.correlationId,
+    });
     this.logger.info(
       { runId: created.id, retryOfRunId: original.id, reusedSteps: reused.length },
       'Run retry queued',
@@ -265,9 +269,9 @@ export class RunDispatcherService {
   }
 
   /** DB first, then Redis: a failed enqueue leaves the run QUEUED for the sweeper. */
-  private async enqueue(runId: string): Promise<void> {
+  private async enqueue(runId: string, context: Record<string, unknown>): Promise<void> {
     try {
-      await this.queue.enqueue(runId);
+      await this.queue.enqueue(runId, context);
     } catch (err) {
       this.logger.warn(
         { runId, error: (err as Error).message },

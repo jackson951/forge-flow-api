@@ -1,6 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bullmq';
+import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../../config/app-config.service';
 import { ExecuteRunJobData, JOBS, QUEUES } from './queue.constants';
 import { RUN_BACKOFF_TYPE } from './retry-backoff';
@@ -11,9 +12,13 @@ export class RunQueue {
   constructor(
     @InjectQueue(QUEUES.WORKFLOW_RUNS) readonly queue: Queue<ExecuteRunJobData>,
     private readonly config: AppConfigService,
-  ) {}
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(RunQueue.name);
+  }
 
-  async enqueue(runId: string): Promise<void> {
+  /** `context` (correlationId, workspaceId, ...) is only logged, never put on the job. */
+  async enqueue(runId: string, context: Record<string, unknown> = {}): Promise<void> {
     const { attempts, backoffMs } = this.config.queue;
     await this.queue.add(
       JOBS.EXECUTE_RUN,
@@ -27,5 +32,6 @@ export class RunQueue {
         removeOnFail: { age: 7 * 24 * 3600 },
       },
     );
+    this.logger.info({ ...context, runId, jobId: runId }, 'Run enqueued');
   }
 }
