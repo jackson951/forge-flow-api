@@ -40,9 +40,17 @@ export interface IntegrationProvider {
   /** URL segment of the callback: /api/v1/integrations/<slug>/callback */
   readonly slug: string;
   isConfigured(): boolean;
-  connectUrl(state: string): string;
+  /**
+   * PKCE (RFC 7636): the shared service creates the verifier, stores it encrypted with the
+   * state, passes the S256 challenge to `connectUrl` and the verifier to `completeConnection`.
+   */
+  readonly usesPkce?: boolean;
+  connectUrl(state: string, pkce?: { codeChallenge: string }): string;
   /** Called with the callback query after `state` was verified and consumed. */
-  completeConnection(query: Record<string, string | undefined>): Promise<CompletedConnection>;
+  completeConnection(
+    query: Record<string, string | undefined>,
+    context?: { codeVerifier?: string },
+  ): Promise<CompletedConnection>;
   /** Best-effort revocation at the provider on disconnect (if the provider supports it). */
   revoke?(credential: Credential): Promise<void>;
 }

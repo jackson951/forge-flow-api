@@ -80,7 +80,13 @@ export const envSchema = z
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
     MICROSOFT_CLIENT_ID: z.string().optional(),
     MICROSOFT_CLIENT_SECRET: z.string().optional(),
-    MICROSOFT_TENANT_ID: z.string().default('common'),
+    /** common | organizations | consumers | a tenant id or domain (single-tenant). */
+    MICROSOFT_TENANT_ID: z
+      .string()
+      .regex(/^[A-Za-z0-9.-]{1,100}$/)
+      .default('common'),
+    MICROSOFT_LOGIN_URL: z.string().url().default('https://login.microsoftonline.com'),
+    MICROSOFT_GRAPH_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
     SLACK_CLIENT_ID: z.string().optional(),
     SLACK_CLIENT_SECRET: z.string().optional(),
     SLACK_SIGNING_SECRET: z.string().optional(),
