@@ -16,6 +16,7 @@ import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../../infrastructure/crypto/encryption.service';
 import { CredentialStore } from './credentials/credential-store';
 import { GitHubClient, GitHubRepository } from './github/github-client';
+import { SlackChannel, SlackClient } from './slack/slack-client';
 import {
   ConnectionDeniedError,
   INTEGRATION_PROVIDERS,
@@ -52,6 +53,7 @@ export class IntegrationsService {
     private readonly config: AppConfigService,
     private readonly audit: AuditService,
     private readonly github: GitHubClient,
+    private readonly slack: SlackClient,
     private readonly credentials: CredentialStore,
     private readonly encryption: EncryptionService,
     private readonly logger: PinoLogger,
@@ -115,7 +117,7 @@ export class IntegrationsService {
     }
 
     try {
-      const details = await provider.completeConnection(query);
+      const { credential, ...details } = await provider.completeConnection(query);
       const connection = await this.prisma.$transaction(async (tx) => {
         const saved = await tx.integrationConnection.upsert({
           where: {
@@ -142,6 +144,8 @@ export class IntegrationsService {
           },
           select: { id: true },
         });
+        // Re-connecting replaces the stored token (e.g. after a revocation).
+        if (credential) await this.credentials.save(saved.id, credential, tx);
         await this.audit.record(
           {
             action: 'integration.connected',
@@ -216,16 +220,50 @@ export class IntegrationsService {
     try {
       return await this.github.listRepositories(Number(connection.externalAccountId));
     } catch (err) {
-      if (err instanceof ExecutionError && err.category === 'PROVIDER_AUTH') {
-        await this.prisma.integrationConnection.update({
-          where: { id: connection.id },
-          data: { status: ConnectionStatus.NEEDS_ATTENTION },
-        });
-        throw new ConflictException('GitHub access was revoked; reconnect the integration');
-      }
-      if (err instanceof ExecutionError) throw new ServiceUnavailableException(err.message);
-      throw err;
+      throw await this.providerFailure(connection.id, 'GitHub', err);
     }
+  }
+
+  /** Channels the Slack bot can post to (for action configuration). IDs and names only. */
+  async listSlackChannels(
+    workspaceId: string,
+    connectionId: string,
+    cursor?: string,
+    limit = 100,
+  ): Promise<{ items: SlackChannel[]; nextCursor: string | null }> {
+    const connection = await this.findConnection(workspaceId, connectionId);
+    if (connection.provider !== IntegrationProviderKey.SLACK) {
+      throw new NotFoundException('Connection not found');
+    }
+    const credential =
+      connection.status === ConnectionStatus.CONNECTED
+        ? await this.credentials.get(workspaceId, connection.id)
+        : null;
+    if (!credential?.accessToken) {
+      throw new ConflictException('This Slack connection needs attention; reconnect it');
+    }
+    try {
+      const page = await this.slack.listChannels(credential.accessToken, cursor, limit);
+      return { items: page.channels, nextCursor: page.nextCursor };
+    } catch (err) {
+      throw await this.providerFailure(connection.id, 'Slack', err);
+    }
+  }
+
+  /**
+   * Maps a provider failure during an API call: revoked access marks the connection
+   * NEEDS_ATTENTION (409); other provider errors are 503 with the safe message.
+   */
+  private async providerFailure(connectionId: string, name: string, err: unknown) {
+    if (err instanceof ExecutionError && err.category === 'PROVIDER_AUTH') {
+      await this.prisma.integrationConnection.update({
+        where: { id: connectionId },
+        data: { status: ConnectionStatus.NEEDS_ATTENTION },
+      });
+      return new ConflictException(`${name} access was revoked; reconnect the integration`);
+    }
+    if (err instanceof ExecutionError) return new ServiceUnavailableException(err.message);
+    return err;
   }
 
   private async consumeState(state: string, provider: IntegrationProviderKey) {

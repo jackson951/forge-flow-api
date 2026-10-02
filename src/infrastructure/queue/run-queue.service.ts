@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { AppConfigService } from '../../config/app-config.service';
 import { ExecuteRunJobData, JOBS, QUEUES } from './queue.constants';
+import { RUN_BACKOFF_TYPE } from './retry-backoff';
 
 /** Enqueues run executions. `jobId = runId`, so enqueueing the same run twice is a no-op. */
 @Injectable()
@@ -20,7 +21,8 @@ export class RunQueue {
       {
         jobId: runId,
         attempts,
-        backoff: { type: 'exponential', delay: backoffMs, jitter: 0.3 },
+        // Exponential with jitter, or the provider's Retry-After (see retry-backoff.ts).
+        backoff: { type: RUN_BACKOFF_TYPE, delay: backoffMs },
         removeOnComplete: { age: 24 * 3600, count: 1_000 },
         removeOnFail: { age: 7 * 24 * 3600 },
       },
