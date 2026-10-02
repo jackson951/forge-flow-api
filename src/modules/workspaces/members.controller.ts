@@ -17,6 +17,7 @@ import {
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiTags,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { CurrentWorkspace, RequireRole } from '../../common/decorators';
 import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
@@ -35,6 +36,7 @@ export class MembersController {
 
   @ApiOkResponse({ type: [MemberResponseDto] })
   @Get()
+  @ApiOperation({ summary: 'Members of the workspace' })
   list(@CurrentWorkspace() access: WorkspaceAccess): Promise<MemberResponseDto[]> {
     return this.members.list(access);
   }
@@ -43,6 +45,7 @@ export class MembersController {
   @ApiCreatedResponse({ type: MemberResponseDto })
   @ApiConflictResponse({ description: 'Already a member' })
   @Post()
+  @ApiOperation({ summary: 'Add an existing user by email (ADMIN)' })
   add(
     @CurrentWorkspace() access: WorkspaceAccess,
     @Body() dto: AddMemberDto,
@@ -55,6 +58,9 @@ export class MembersController {
   @ApiForbiddenResponse()
   @ApiConflictResponse({ description: 'Would leave the workspace without an owner' })
   @Patch(':userId')
+  @ApiOperation({
+    summary: "Change a member's role (ADMIN; only an OWNER can grant or remove OWNER)",
+  })
   changeRole(
     @CurrentWorkspace() access: WorkspaceAccess,
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -68,6 +74,7 @@ export class MembersController {
   @ApiForbiddenResponse()
   @ApiConflictResponse({ description: 'Would leave the workspace without an owner' })
   @Delete(':userId')
+  @ApiOperation({ summary: 'Remove a member (ADMIN), or leave the workspace yourself' })
   remove(
     @CurrentWorkspace() access: WorkspaceAccess,
     @Param('userId', ParseUUIDPipe) userId: string,

@@ -8,6 +8,7 @@ import {
   ApiTags,
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { byIp, byIpAndEmail, MINUTE, RATE_LIMITS } from '../../common/throttling/rate-limits';
@@ -48,6 +49,7 @@ export class AuthController {
   @ApiConflictResponse({ description: 'Email already registered' })
   @ApiTooManyRequestsResponse()
   @Post('register')
+  @ApiOperation({ summary: 'Create an account (and a personal workspace); returns a session' })
   async register(
     @Body() dto: RegisterDto,
     @Req() req: Request,
@@ -66,6 +68,7 @@ export class AuthController {
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
   @ApiTooManyRequestsResponse()
   @Post('login')
+  @ApiOperation({ summary: 'Log in with email and password; returns a session' })
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
@@ -80,6 +83,9 @@ export class AuthController {
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, expired, revoked or reused token' })
   @Post('refresh')
+  @ApiOperation({
+    summary: 'Exchange a refresh token (body or cookie) for a new session; rotates the token',
+  })
   async refresh(
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
@@ -98,6 +104,7 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse({ description: 'Session ended (idempotent)' })
   @Post('logout')
+  @ApiOperation({ summary: 'Revoke the current refresh token' })
   async logout(
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
@@ -111,6 +118,7 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse({ description: 'All sessions of the user ended' })
   @Post('logout-all')
+  @ApiOperation({ summary: 'Revoke every session of the current user' })
   async logoutAll(
     @CurrentUser() user: AuthenticatedUser,
     @Res({ passthrough: true }) res: Response,
@@ -122,6 +130,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: UserResponseDto })
   @Get('me')
+  @ApiOperation({ summary: 'The current user' })
   me(@CurrentUser() user: AuthenticatedUser): Promise<PublicUser> {
     return this.auth.me(user.userId);
   }

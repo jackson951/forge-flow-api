@@ -102,13 +102,13 @@ jobs:
           test "$(docker run --rm flowforge-api:ci id -u)" != "0"
           ! docker run --rm flowforge-api:ci test -d node_modules/typescript
           ! docker run --rm flowforge-api:ci test -e .env
-      - name: Vulnerability scan (non-blocking, see docs/backend/20-*)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: flowforge-api:ci
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '0'
+      - name: Vulnerability scan (HIGH/CRITICAL with a fix available fail the build)
+        # The Trivy image pinned by digest (tags can be moved; trivy-action@0.28.0 stopped
+        # resolving, see docs/backend/22-*). Baseline: 0 findings.
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 flowforge-api:ci
 
   # No secrets in the repository or its history (AC-20.6).
   secret-scan:

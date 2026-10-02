@@ -187,3 +187,14 @@ describe('validateEnv', () => {
     });
   });
 });
+
+describe('.env.example (Part 22: setup from a clean clone)', () => {
+  it('passes validation exactly as copied by the setup guide', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseEnv } = require('node:util') as { parseEnv(s: string): Record<string, string> };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const example = parseEnv(readFileSync(`${__dirname}/../../.env.example`, 'utf8'));
+    expect(() => validateEnv(example)).not.toThrow();
+  });
+});
