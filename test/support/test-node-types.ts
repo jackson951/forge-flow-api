@@ -64,6 +64,18 @@ const types: NodeTypeDefinition[] = [
     configSchema: empty,
   },
   {
+    // Webhook trigger for the non-production TEST provider (Part 09).
+    type: 'test.event',
+    kind: 'TRIGGER',
+    displayName: 'Test webhook event',
+    configSchema: z.object({ event: z.string().min(1), resource: z.string().min(1) }).strict(),
+    route: (config) => ({
+      provider: 'TEST',
+      eventType: String(config.event),
+      resourceKey: String(config.resource),
+    }),
+  },
+  {
     type: 'test.sideEffect',
     kind: 'ACTION',
     displayName: 'Records a non-idempotent call',
@@ -73,6 +85,12 @@ const types: NodeTypeDefinition[] = [
 
 export function testHandlers(control: TestNodeControl): NodeHandler[] {
   return [
+    {
+      type: 'test.event',
+      kind: 'TRIGGER',
+      sideEffect: 'none',
+      execute: async ({ triggerInput }) => ({ output: triggerInput ?? {} }),
+    },
     {
       type: 'test.flaky',
       kind: 'ACTION',

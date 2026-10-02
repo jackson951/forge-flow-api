@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { NodeTypeCatalog } from './catalog/node-type-catalog';
-import { ConditionEvaluatorService } from './conditions/condition-evaluator.service';
+import { GITHUB_NODE_TYPES } from '../modules/integrations/github/github.node-types';
+import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from './catalog/node-type-catalog';
 import { DefinitionValidatorService } from './executor/definition-validator.service';
 
 /**
@@ -11,10 +11,12 @@ import { DefinitionValidatorService } from './executor/definition-validator.serv
   providers: [
     // One catalog per application (a factory, not a shared instance), so registrations in
     // one app or test never leak into another.
-    { provide: NodeTypeCatalog, useFactory: () => new NodeTypeCatalog() },
+    {
+      provide: NodeTypeCatalog,
+      useFactory: () => new NodeTypeCatalog([...BUILT_IN_NODE_TYPES, ...GITHUB_NODE_TYPES]),
+    },
     DefinitionValidatorService,
-    ConditionEvaluatorService,
   ],
-  exports: [NodeTypeCatalog, DefinitionValidatorService, ConditionEvaluatorService],
+  exports: [NodeTypeCatalog, DefinitionValidatorService],
 })
 export class EngineModule {}

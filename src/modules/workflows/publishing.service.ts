@@ -4,7 +4,9 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma, WorkflowStatus } from '@prisma/client';
+import { ConnectionStatus, Prisma, WorkflowStatus } from '@prisma/client';
+import { NodeTypeCatalog } from '../../engine/catalog/node-type-catalog';
+import { WorkflowDefinition } from '../../engine/definition/definition.schema';
 import { definitionHash } from '../../engine/definition/canonical-json';
 import { DefinitionValidatorService } from '../../engine/executor/definition-validator.service';
 import { hasErrors } from '../../engine/validation/graph-validator';
@@ -39,6 +41,7 @@ export class PublishingService {
     private readonly validator: DefinitionValidatorService,
     private readonly routing: TriggerRoutingService,
     private readonly audit: AuditService,
+    private readonly catalog: NodeTypeCatalog,
   ) {}
 
   async publish(
@@ -74,6 +77,13 @@ export class PublishingService {
         throw new UnprocessableEntityException({
           message: 'The draft has validation errors and cannot be published',
           details: issues,
+        });
+      }
+      const connectionIssues = await this.checkConnections(tx, workspaceId, parsed.definition);
+      if (connectionIssues.length) {
+        throw new UnprocessableEntityException({
+          message: 'The draft uses integrations that are not connected in this workspace',
+          details: connectionIssues,
         });
       }
 
@@ -164,6 +174,44 @@ export class PublishingService {
     });
     if (!found) throw new NotFoundException('Version not found');
     return { ...found, isActive: found.id === workflow.activeVersionId };
+  }
+
+  /**
+   * Every node acting through an integration must reference a CONNECTED connection of the
+   * right provider in this workspace. Without this, a pasted connection id from another
+   * workspace could route that workspace's events or credentials into this workflow.
+   */
+  private async checkConnections(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    definition: WorkflowDefinition,
+  ): Promise<
+    { code: 'CONNECTION_INVALID'; severity: 'error'; nodeKey: string; message: string }[]
+  > {
+    const issues = [];
+    for (const node of definition.nodes) {
+      const provider = this.catalog.get(node.type)?.connectionProvider;
+      if (!provider) continue;
+      const connectionId = node.config.connectionId;
+      const connection =
+        typeof connectionId === 'string'
+          ? await tx.integrationConnection.findFirst({
+              where: { id: connectionId, workspaceId, provider },
+              select: { status: true },
+            })
+          : null;
+      if (connection?.status !== ConnectionStatus.CONNECTED) {
+        issues.push({
+          code: 'CONNECTION_INVALID' as const,
+          severity: 'error' as const,
+          nodeKey: node.key,
+          message: connection
+            ? `The ${provider} connection needs attention (${connection.status})`
+            : `No ${provider} connection with this id in this workspace`,
+        });
+      }
+    }
+    return issues;
   }
 
   private async findWorkflow(workspaceId: string, id: string) {
