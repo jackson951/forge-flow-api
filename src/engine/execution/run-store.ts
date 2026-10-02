@@ -4,6 +4,11 @@ import { ErrorCategory, RunStatus, StepStatus } from '@prisma/client';
  * Persistence port of the execution engine. The engine depends only on this interface, so
  * it is unit-tested with an in-memory implementation; production uses PrismaRunStore.
  * Every state change is a conditional update that refuses illegal transitions.
+ *
+ * Fencing (Part 15): writes that decide what happens next take the `claim` token of the
+ * worker's run claim. If the run has since been claimed by another worker, the store throws
+ * OwnershipLostError instead of writing. `completeStep` is deliberately not fenced: a worker
+ * that finished a side effect records the truth even if it lost the run meanwhile.
  */
 
 export interface RunSnapshot {
@@ -46,13 +51,18 @@ export interface RunStore {
   loadSteps(runId: string): Promise<Map<string, StepSnapshot>>;
 
   /** → RUNNING, attemptCount + 1, records the sanitised input. Returns the new attempt. */
-  startStep(runId: string, nodeKey: string, sanitizedInput: unknown): Promise<number>;
+  startStep(
+    runId: string,
+    nodeKey: string,
+    sanitizedInput: unknown,
+    claim?: string,
+  ): Promise<number>;
   completeStep(
     runId: string,
     nodeKey: string,
     result: { sanitizedOutput: unknown; durationMs: number; externalRef?: string },
   ): Promise<void>;
-  failStep(runId: string, nodeKey: string, failure: StepFailure): Promise<void>;
+  failStep(runId: string, nodeKey: string, failure: StepFailure, claim?: string): Promise<void>;
   /** Marks every still PENDING/RETRYING step SKIPPED. */
-  skipRemaining(runId: string): Promise<void>;
+  skipRemaining(runId: string, claim?: string): Promise<void>;
 }

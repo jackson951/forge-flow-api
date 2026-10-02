@@ -1,5 +1,7 @@
 import { NodeTypeCatalog } from '../catalog/node-type-catalog';
-import { NodeHandler } from './node-handler';
+import { NodeHandler, SideEffect } from './node-handler';
+
+const SIDE_EFFECTS: readonly SideEffect[] = ['none', 'idempotent', 'non-idempotent'];
 
 /** Maps node types to handlers. Validated against the catalog at worker startup. */
 export class NodeHandlerRegistry {
@@ -31,6 +33,10 @@ export class NodeHandlerRegistry {
       if (!handler) return [`No handler for node type "${type.type}"`];
       if (handler.kind !== type.kind) {
         return [`Handler for "${type.type}" is ${handler.kind}, catalog says ${type.kind}`];
+      }
+      // Part 15: retry/resume safety depends on every handler declaring its side effects.
+      if (!SIDE_EFFECTS.includes(handler.sideEffect)) {
+        return [`Handler for "${type.type}" does not declare a valid sideEffect`];
       }
       return [];
     });

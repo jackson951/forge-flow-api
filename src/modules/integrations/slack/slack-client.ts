@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCategory } from '@prisma/client';
+import { providerNetworkError } from '../../../common/http/fetch-failure';
 import { AppConfigService } from '../../../config/app-config.service';
 import { ExecutionError, PermanentError, RetryableError } from '../../../engine/errors';
 
@@ -202,21 +203,12 @@ export class SlackClient {
 }
 
 /**
- * A timeout on a side-effecting call is ambiguous (Slack may have posted the message), so it
- * is not retried automatically (Part 15). Other network failures are retried.
+ * A request that never left (DNS, refused) is retried; a timeout or a connection lost
+ * mid-request on a side-effecting call is ambiguous — Slack may have posted the message — so
+ * it is UNCERTAIN_OUTCOME and not retried automatically (Part 15).
  */
-function networkError(err: unknown, sideEffect: boolean): ExecutionError {
-  const name = (err as Error)?.name;
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return sideEffect
-      ? new PermanentError(
-          ErrorCategory.UNCERTAIN_OUTCOME,
-          'Slack did not answer in time; the message may have been posted, so it is not retried automatically',
-        )
-      : new RetryableError(ErrorCategory.PROVIDER_TIMEOUT, 'Slack did not respond in time');
-  }
-  return new RetryableError(ErrorCategory.TRANSIENT_INFRASTRUCTURE, 'Could not reach Slack');
-}
+const networkError = (err: unknown, sideEffect: boolean): ExecutionError =>
+  providerNetworkError(err, { provider: 'Slack', sideEffect });
 
 const retryAfterMs = (headers: Headers) => {
   const seconds = Number(headers.get('retry-after'));

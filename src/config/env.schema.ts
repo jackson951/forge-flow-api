@@ -48,6 +48,8 @@ export const envSchema = z
     QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).default(2_000),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
     NODE_TIMEOUT_MS: z.coerce.number().int().min(100).default(30_000),
+    /** BullMQ job lock; a crashed worker's job is redelivered after about this long. */
+    WORKER_LOCK_DURATION_MS: z.coerce.number().int().min(1_000).default(30_000),
     /** QUEUED runs older than this are re-enqueued by the sweeper (lost-enqueue recovery). */
     SWEEPER_STALE_AFTER_MS: z.coerce.number().int().min(1_000).default(60_000),
     SWEEPER_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
