@@ -11,6 +11,11 @@ export class NodeTypesController {
 
   @Get()
   list() {
-    return this.catalog.list().map(({ type, kind, displayName }) => ({ type, kind, displayName }));
+    return this.catalog.list().map(({ type, kind, displayName, unavailableReason }) => ({
+      type,
+      kind,
+      displayName,
+      available: !unavailableReason,
+    }));
   }
 }

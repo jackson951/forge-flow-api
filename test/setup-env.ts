@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import './support/block-external-http';
 // Runs before each e2e test file, i.e. before ConfigModule reads the environment.
 // Values already set in the shell/CI win; `.env` fills the rest (DATABASE_URL, secrets).
 process.env.NODE_ENV = 'test';
@@ -15,3 +16,8 @@ process.env.WEBHOOK_TEST_SECRET ??= 'integration-test-webhook-secret';
 // Credential encryption for tests (fresh random key per test file; DB is truncated per suite).
 process.env.ENCRYPTION_KEYS ??= `test1:${randomBytes(32).toString('base64')}`;
 process.env.ENCRYPTION_ACTIVE_KEY_ID ??= 'test1';
+// AI steps use the deterministic fake; forced so a real key in .env is never used by tests.
+process.env.AI_PROVIDER = 'fake';
+process.env.AI_API_URL = 'http://127.0.0.1:9';
+// Canary: configured but never used by the fake; tests assert it never leaks.
+process.env.AI_API_KEY = 'test-ai-key-canary-not-real';

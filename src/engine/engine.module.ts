@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AppConfigService } from '../config/app-config.service';
+import { aiNodeTypes } from '../modules/ai/ai.node-types';
 import { GITHUB_NODE_TYPES } from '../modules/integrations/github/github.node-types';
 import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from './catalog/node-type-catalog';
 import { DefinitionValidatorService } from './executor/definition-validator.service';
@@ -13,7 +15,13 @@ import { DefinitionValidatorService } from './executor/definition-validator.serv
     // one app or test never leak into another.
     {
       provide: NodeTypeCatalog,
-      useFactory: () => new NodeTypeCatalog([...BUILT_IN_NODE_TYPES, ...GITHUB_NODE_TYPES]),
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService) =>
+        new NodeTypeCatalog([
+          ...BUILT_IN_NODE_TYPES,
+          ...GITHUB_NODE_TYPES,
+          ...aiNodeTypes(Boolean(config.ai.provider)),
+        ]),
     },
     DefinitionValidatorService,
   ],

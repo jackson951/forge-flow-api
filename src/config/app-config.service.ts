@@ -42,6 +42,18 @@ export class AppConfigService {
     };
   }
 
+  get ai() {
+    return {
+      provider: this.get('AI_PROVIDER'),
+      apiKey: this.get('AI_API_KEY'),
+      apiUrl: this.get('AI_API_URL'),
+      model: this.get('AI_MODEL'),
+      timeoutMs: this.get('AI_TIMEOUT_MS'),
+      maxInputChars: this.get('AI_MAX_INPUT_CHARS'),
+      maxOutputTokens: this.get('AI_MAX_OUTPUT_TOKENS'),
+    };
+  }
+
   get redis() {
     return {
       host: this.get('REDIS_HOST'),

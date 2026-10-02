@@ -49,4 +49,16 @@ describe('security architecture', () => {
     const select = /CONNECTION_SELECT = \{([\s\S]*?)\}/.exec(service.source)?.[1] ?? '';
     expect(select).not.toMatch(/credential|encrypted/i);
   });
+
+  it('only the worker can call the AI provider (AC-12.5: the API never holds a model client)', () => {
+    const importers = files
+      .filter((f) =>
+        /from '[^']*ai\/(ai\.module|anthropic\.provider|fake-ai\.provider)'/.test(f.source),
+      )
+      .map((f) => f.path)
+      .filter((p) => !p.startsWith('modules/ai/'));
+    expect(importers).toEqual(['execution/execution.module.ts']);
+    const appModule = files.find((f) => f.path === 'app.module.ts')!;
+    expect(appModule.source).not.toMatch(/AiModule|ExecutionModule/);
+  });
 });
