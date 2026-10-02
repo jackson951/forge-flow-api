@@ -22,6 +22,8 @@ export function createValidationPipe(): ValidationPipe {
     whitelist: true,
     forbidNonWhitelisted: true,
     transform: true,
+    // No implicit type coercion: query numbers use explicit @Type(() => Number).
+    transformOptions: { enableImplicitConversion: false },
     exceptionFactory: (errors) =>
       new BadRequestException({
         message: 'Validation failed',

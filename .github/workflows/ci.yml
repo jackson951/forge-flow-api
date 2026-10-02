@@ -46,6 +46,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Part 18: fail on high/critical advisories (exceptions are documented in docs/backend/18-*).
+      - run: npm audit --audit-level=high
       - run: npx prisma generate
       - run: npx prisma validate
       - run: npx prettier --check "src/**/*.ts" "test/**/*.ts"

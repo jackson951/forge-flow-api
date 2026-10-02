@@ -10,6 +10,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { byIp, byIpAndEmail, MINUTE, RATE_LIMITS } from '../../common/throttling/rate-limits';
 import { Request, Response } from 'express';
 import { CurrentUser, Public } from '../../common/decorators';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
@@ -28,15 +29,6 @@ import {
 } from './refresh-cookie';
 import { TokenService } from './token.service';
 
-const MINUTE = 60_000;
-
-/** Login attempts are limited per (IP, email) pair, so one attacker can't lock out others. */
-const ipAndEmail = (req: Record<string, unknown>): string => {
-  const body = req.body as { email?: unknown } | undefined;
-  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
-  return `${String(req.ip)}|${email}`;
-};
-
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -51,7 +43,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: MINUTE } })
+  @Throttle({ default: { limit: RATE_LIMITS.registerPerIp, ttl: MINUTE, getTracker: byIp } })
   @ApiCreatedResponse({ type: AuthResponseDto })
   @ApiConflictResponse({ description: 'Email already registered' })
   @ApiTooManyRequestsResponse()
@@ -65,7 +57,10 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: MINUTE, getTracker: ipAndEmail } })
+  @Throttle({
+    default: { limit: RATE_LIMITS.loginPerIpAndEmail, ttl: MINUTE, getTracker: byIpAndEmail },
+    ip: { limit: RATE_LIMITS.loginPerIp, ttl: MINUTE, getTracker: byIp },
+  })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
@@ -80,7 +75,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 30, ttl: MINUTE } })
+  @Throttle({ default: { limit: RATE_LIMITS.refreshPerIp, ttl: MINUTE, getTracker: byIp } })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: TokenResponseDto })
   @ApiUnauthorizedResponse({ description: 'Missing, invalid, expired, revoked or reused token' })

@@ -4,7 +4,8 @@ import { providerNetworkError } from '../../../common/http/fetch-failure';
 import { AppConfigService } from '../../../config/app-config.service';
 import { ExecutionError, PermanentError, RetryableError } from '../../../engine/errors';
 
-const TIMEOUT_MS = 10_000;
+/** Every Slack call is aborted after this (Part 18: ≤ 30 s). */
+export const SLACK_TIMEOUT_MS = 10_000;
 
 /** Bot scopes requested on connect. No user-token scopes. */
 export const SLACK_BOT_SCOPES = ['chat:write', 'channels:read', 'groups:read'];
@@ -182,7 +183,7 @@ export class SlackClient {
         body: new URLSearchParams(
           Object.entries(params).map(([k, v]) => [k, String(v)] as [string, string]),
         ),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(SLACK_TIMEOUT_MS),
       });
     } catch (err) {
       throw networkError(err, sideEffect);
