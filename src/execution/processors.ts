@@ -63,7 +63,7 @@ export class RunSweeper {
   async sweep(limit = 100): Promise<number> {
     const olderThan = new Date(Date.now() - this.config.queue.sweeperStaleAfterMs);
     const stale = await this.store.findStaleQueuedRuns(olderThan, limit);
-    for (const run of stale) await this.queue.enqueue(run.id);
+    for (const run of stale) await this.queue.enqueue(run.id, { reason: 'sweeper' });
     if (stale.length) this.logger.info({ count: stale.length }, 'Re-enqueued stale QUEUED runs');
     return stale.length;
   }
