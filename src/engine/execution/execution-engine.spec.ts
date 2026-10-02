@@ -5,6 +5,7 @@ import { BUILT_IN_HANDLERS } from './built-in-handlers';
 import { ExecutionEngine, identityResolver, ValueResolver } from './execution-engine';
 import { NodeHandlerRegistry } from './handler-registry';
 import { NodeHandler, SideEffect } from './node-handler';
+import { ProviderConcurrencyLimiter, ProviderSlotsBusyError, StepSlots } from './provider-slots';
 import { InMemoryRunStore } from './testing/in-memory-run-store';
 import { IllegalTransitionError } from './transitions';
 
@@ -39,6 +40,7 @@ function setup(
     maxOutputBytes?: number;
     resolver?: ValueResolver;
     triggerInput?: unknown;
+    slots?: StepSlots;
   } = {},
 ) {
   const calls: string[] = [];
@@ -78,6 +80,8 @@ function setup(
   const engine = new ExecutionEngine(store, registry, opts.resolver ?? identityResolver, {
     nodeTimeoutMs: opts.timeoutMs ?? 1_000,
     maxOutputBytes: opts.maxOutputBytes,
+    slots: opts.slots,
+    slotRetryDelayMs: () => 777,
   });
   return { engine, store, calls };
 }
@@ -494,6 +498,61 @@ describe('ExecutionEngine', () => {
         b: 'SKIPPED',
         c: 'SKIPPED',
       });
+    });
+  });
+
+  describe('provider slots (Part 21)', () => {
+    // Every "rec" node counts as provider "p", one step at a time.
+    const limiter = () => new ProviderConcurrencyLimiter(1, (t) => (t === 'rec' ? 'p' : undefined));
+
+    it('takes a slot per step and gives it back after success and failure', async () => {
+      const slots = limiter();
+      const seen: number[] = [];
+      const ok = setup([node('a'), node('b')], [edge('trigger', 'a'), edge('a', 'b')], {
+        slots,
+        behave: { a: async () => seen.push(slots.active('p')) },
+      });
+      await ok.engine.execute(RUN, lastAttempt);
+      expect(seen).toEqual([1]);
+      expect(slots.active('p')).toBe(0);
+
+      const failing = setup([node('a')], [edge('trigger', 'a')], {
+        slots,
+        behave: { a: () => Promise.reject(new PermanentError(ErrorCategory.VALIDATION, 'no')) },
+      });
+      await expect(failing.engine.execute(RUN, lastAttempt)).rejects.toThrow('no');
+      expect(slots.active('p')).toBe(0);
+    });
+
+    it('when the provider is full the step does not start and leaves no trace; the next attempt resumes there', async () => {
+      const slots = limiter();
+      const { engine, store, calls } = setup(
+        [node('a'), node('b')],
+        [edge('trigger', 'a'), edge('a', 'b')],
+        {
+          slots,
+        },
+      );
+      const elsewhere = slots.tryAcquire('rec')!; // another run holds the only slot
+
+      const err = await engine.execute(RUN, notLast).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ProviderSlotsBusyError);
+      expect(err).toMatchObject({ provider: 'p', retryAfterMs: 777 });
+      expect(calls).toEqual([]);
+      expect(store.states()).toEqual({ trigger: 'SUCCEEDED', a: 'PENDING', b: 'PENDING' });
+      expect(store.steps.get('a')?.attemptCount).toBe(0);
+
+      elsewhere();
+      await expect(engine.execute(RUN, lastAttempt)).resolves.toEqual({ status: 'SUCCEEDED' });
+      expect(calls).toEqual(['a', 'b']);
+      expect(store.steps.get('a')?.attemptCount).toBe(1);
+    });
+
+    it('node types without a provider are never limited', async () => {
+      const slots = new ProviderConcurrencyLimiter(1, (t) => (t === 'other' ? 'p' : undefined));
+      slots.tryAcquire('other');
+      const { engine } = setup([node('a')], [edge('trigger', 'a')], { slots });
+      await expect(engine.execute(RUN, lastAttempt)).resolves.toEqual({ status: 'SUCCEEDED' });
     });
   });
 

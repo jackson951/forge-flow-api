@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Env } from './env.schema';
+import { databaseUrlWithPool, Env } from './env.schema';
 
 /** Typed wrapper around ConfigService so callers never deal with raw strings. */
 @Injectable()
@@ -39,6 +39,26 @@ export class AppConfigService {
       nodeTimeoutMs: this.get('NODE_TIMEOUT_MS'),
       sweeperStaleAfterMs: this.get('SWEEPER_STALE_AFTER_MS'),
       sweeperIntervalMs: this.get('SWEEPER_INTERVAL_MS'),
+      providerConcurrency:
+        this.get('PROVIDER_CONCURRENCY') ?? Math.ceil(this.get('WORKER_CONCURRENCY') / 2),
+      backpressureThreshold: this.get('QUEUE_BACKPRESSURE_THRESHOLD'),
+    };
+  }
+
+  get databaseUrl(): string {
+    return databaseUrlWithPool(this.get('DATABASE_URL'), this.get('DATABASE_CONNECTION_LIMIT'));
+  }
+
+  get retention() {
+    const days = (n: number) => n * 24 * 3_600_000;
+    return {
+      enabled: this.get('RETENTION_ENABLED') ?? true,
+      webhookDeliveryMs: days(this.get('RETENTION_WEBHOOK_DELIVERY_DAYS')),
+      stepPayloadMs: days(this.get('RETENTION_STEP_PAYLOAD_DAYS')),
+      runMs: days(this.get('RETENTION_RUN_DAYS')),
+      batchSize: this.get('RETENTION_BATCH_SIZE'),
+      maxBatches: this.get('RETENTION_MAX_BATCHES'),
+      intervalMs: this.get('RETENTION_INTERVAL_MS'),
     };
   }
 

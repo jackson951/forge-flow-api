@@ -104,7 +104,11 @@ export class RunsService {
             ...(query.to && { lt: new Date(query.to) }),
           },
         }),
+        // Keyset: rows after (createdAt, id). The redundant `lte` becomes an index condition,
+        // so the scan starts at the cursor; the OR alone is only a filter and every newer row
+        // would be read and discarded (Part 21: 295 ms → 2 ms at 200k rows deep).
         ...(cursor && {
+          AND: [{ createdAt: { lte: cursor.createdAt } }],
           OR: [
             { createdAt: { lt: cursor.createdAt } },
             { createdAt: cursor.createdAt, id: { lt: cursor.id } },
@@ -133,6 +137,7 @@ export class RunsService {
         correlationId: true,
         webhookDeliveryId: true,
         cancelRequestedAt: true,
+        payloadsTrimmedAt: true,
         queuedAt: true,
         retries: { select: { id: true }, orderBy: { createdAt: 'asc' } },
         steps: {
@@ -153,6 +158,8 @@ export class RunsService {
       webhookDeliveryId: run.webhookDeliveryId,
       queuedAt: run.queuedAt,
       cancelRequestedAt: run.cancelRequestedAt,
+      /** Set when retention removed the steps' stored input/output (Part 21). */
+      payloadsTrimmedAt: run.payloadsTrimmedAt,
       retriedByRunIds: run.retries.map((r) => r.id),
       failedStep: failed
         ? {

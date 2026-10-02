@@ -11,6 +11,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import { parseDefinition } from '../../engine/definition/definition.schema';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
+import { QueueBackpressure } from '../../infrastructure/queue/queue-backpressure.service';
 import { RunQueue } from '../../infrastructure/queue/run-queue.service';
 import { AuditService } from '../audit/audit.service';
 
@@ -58,6 +59,7 @@ export class RunDispatcherService {
     private readonly prisma: PrismaService,
     private readonly queue: RunQueue,
     private readonly audit: AuditService,
+    private readonly backpressure: QueueBackpressure,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(RunDispatcherService.name);
@@ -87,6 +89,7 @@ export class RunDispatcherService {
       throw new ConflictException('This workflow is started by its trigger, not manually');
     }
 
+    await this.backpressure.assertAcceptingManualRuns();
     const idempotencyKey = `manual:${request.idempotencyKey ?? randomUUID()}`;
     let run: { id: string; status: RunStatus; workflowId: string };
     try {
@@ -140,6 +143,7 @@ export class RunDispatcherService {
         workflowId: true,
         workflowVersionId: true,
         triggerInput: true,
+        payloadsTrimmedAt: true,
         workflow: { select: { status: true } },
         steps: {
           select: {
@@ -165,6 +169,14 @@ export class RunDispatcherService {
     if (original.workflow.status === WorkflowStatus.ARCHIVED) {
       throw new ConflictException('Archived workflows cannot be run');
     }
+    // Retention cleared the stored step outputs that a resume would reuse (Part 21).
+    if (request.resumeFromFailedStep && original.payloadsTrimmedAt) {
+      throw new ConflictException({
+        message:
+          'This run is too old to resume: its step outputs were removed by retention. Retry it from the start instead',
+        details: { code: 'PAYLOADS_TRIMMED' },
+      });
+    }
     const uncertain = original.steps
       .filter(
         (s) =>
@@ -179,6 +191,7 @@ export class RunDispatcherService {
       });
     }
 
+    await this.backpressure.assertAcceptingManualRuns();
     const reused = request.resumeFromFailedStep
       ? original.steps.filter((s) => s.status === StepStatus.SUCCEEDED)
       : [];

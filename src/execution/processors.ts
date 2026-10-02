@@ -1,13 +1,14 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
-import { Job, Queue } from 'bullmq';
+import { DelayedError, Job, Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../config/app-config.service';
 import { ExecuteRunJobData, JOBS, QUEUES } from '../infrastructure/queue/queue.constants';
 import { runBackoffStrategy } from '../infrastructure/queue/retry-backoff';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
 import { PrismaRunStore } from './prisma-run-store';
-import { RunWorkerService } from './run-worker.service';
+import { RetentionService } from './retention.service';
+import { RunPostponedError, RunWorkerService } from './run-worker.service';
 
 /**
  * Consumes `workflow-runs`. Registered only in the worker process.
@@ -39,12 +40,19 @@ export class WorkflowRunProcessor extends WorkerHost implements OnApplicationBoo
     this.worker.concurrency = this.config.queue.concurrency;
   }
 
-  async process(job: Job<ExecuteRunJobData>): Promise<void> {
-    await this.runs.process(job.data.runId, {
-      jobId: String(job.id),
-      attemptsMade: job.attemptsMade,
-      maxAttempts: job.opts.attempts ?? 1,
-    });
+  async process(job: Job<ExecuteRunJobData>, token?: string): Promise<void> {
+    try {
+      await this.runs.process(job.data.runId, {
+        jobId: String(job.id),
+        attemptsMade: job.attemptsMade,
+        maxAttempts: job.opts.attempts ?? 1,
+      });
+    } catch (err) {
+      if (!(err instanceof RunPostponedError)) throw err;
+      // Delayed, not failed: BullMQ does not count it as an attempt (Part 21, FR-21.3).
+      await job.moveToDelayed(Date.now() + err.delayMs, token);
+      throw new DelayedError();
+    }
   }
 }
 
@@ -73,6 +81,7 @@ export class RunSweeper {
 export class MaintenanceProcessor extends WorkerHost implements OnApplicationBootstrap {
   constructor(
     private readonly sweeper: RunSweeper,
+    private readonly retention: RetentionService,
     private readonly config: AppConfigService,
     @InjectQueue(QUEUES.MAINTENANCE) private readonly maintenance: Queue,
   ) {
@@ -86,9 +95,22 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
       { every: this.config.queue.sweeperIntervalMs },
       { name: JOBS.SWEEP_QUEUED_RUNS, opts: { removeOnComplete: true, removeOnFail: 100 } },
     );
+    const retention = this.config.retention;
+    if (retention.enabled) {
+      await this.maintenance.upsertJobScheduler(
+        JOBS.APPLY_RETENTION,
+        { every: retention.intervalMs },
+        { name: JOBS.APPLY_RETENTION, opts: { removeOnComplete: true, removeOnFail: 100 } },
+      );
+    } else {
+      await this.maintenance.removeJobScheduler(JOBS.APPLY_RETENTION);
+    }
   }
 
   async process(job: Job): Promise<void> {
     if (job.name === JOBS.SWEEP_QUEUED_RUNS) await this.sweeper.sweep();
+    if (job.name === JOBS.APPLY_RETENTION && this.config.retention.enabled) {
+      await this.retention.run();
+    }
   }
 }
