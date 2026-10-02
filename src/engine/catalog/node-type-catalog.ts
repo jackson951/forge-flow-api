@@ -1,6 +1,7 @@
 import { IntegrationProviderKey } from '@prisma/client';
 import { z, ZodType } from 'zod';
 import { NodeKind } from '../definition/definition.schema';
+import { conditionConfigSchema } from '../expressions/conditions';
 
 /** Where a webhook-driven trigger listens; stored as a WorkflowTrigger row on publish. */
 export interface TriggerRoute {
@@ -22,39 +23,14 @@ export interface NodeTypeDefinition {
    * it (e.g. manual.trigger) are started through the API instead.
    */
   route?: (config: Record<string, unknown>) => TriggerRoute;
+  /**
+   * Nodes that act through an integration: their config's `connectionId` must reference a
+   * CONNECTED connection of this provider in the workflow's own workspace (checked on publish).
+   */
+  connectionProvider?: IntegrationProviderKey;
 }
 
 // ── Built-in node types ──────────────────────────────────────────────────────
-
-const operand = z.union([
-  z.object({ ref: z.string().min(1).max(300) }).strict(),
-  z.object({ value: z.union([z.string().max(1000), z.number(), z.boolean(), z.null()]) }).strict(),
-]);
-
-const clause = z
-  .object({
-    left: operand,
-    operator: z.enum([
-      'equals',
-      'notEquals',
-      'contains',
-      'greaterThan',
-      'lessThan',
-      'exists',
-      'notExists',
-    ]),
-    right: operand.optional(),
-  })
-  .strict();
-
-/**
- * Condition config structure. Reference syntax and ancestor checks, plus the
- * operator/operand pairing rules, are added in Part 11.
- */
-export const conditionConfigSchema = z.union([
-  z.object({ all: z.array(clause).min(1).max(20) }).strict(),
-  z.object({ any: z.array(clause).min(1).max(20) }).strict(),
-]);
 
 export const BUILT_IN_NODE_TYPES: NodeTypeDefinition[] = [
   {

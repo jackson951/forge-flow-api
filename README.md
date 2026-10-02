@@ -2,7 +2,7 @@
 
 Backend for **FlowForge** — an integration & workflow automation platform. NestJS 11 · TypeScript · PostgreSQL/Prisma · Redis/BullMQ.
 
-> Status: foundation, data model, authentication, workspace authorization, workflow management, publishing, the run queue/worker and the execution engine are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
+> Status: foundation, data model, authentication, workspace authorization, workflow management, publishing, the run queue/worker, the execution engine with conditions and data mapping, the webhook platform and the GitHub integration are implemented (see [docs/backend](docs/backend/00-BACKEND-ROADMAP.md)). Routes for later parts exist but return `501 Not Implemented`. Every non-`@Public()` route requires a bearer token, and every `/workspaces/:workspaceId/...` route requires membership (non-members get `404`).
 
 ## Quick start
 
@@ -48,7 +48,8 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
 | `/workspaces/:workspaceId/dashboard` | dashboard |
-| `/webhooks/:provider` | webhooks |
+| `/webhooks/:provider` (`github`, `test` in non-production) | webhooks |
+| `/workspaces/:workspaceId/integrations/:connectionId/github/repositories` | integrations |
 | `/health`, `/health/ready` | health |
 
 See `docs/architecture.md` for the process split and folder map.

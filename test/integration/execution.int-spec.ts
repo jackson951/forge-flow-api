@@ -368,28 +368,140 @@ describe('Queue, worker and execution engine (integration)', () => {
       });
     });
 
-    it('built-in condition nodes fail clearly until Part 11', async () => {
-      const id = await startRun({
+    describe('conditions and data mapping (Part 11)', () => {
+      /** trigger → classify (maps data) → check (condition) → alert (true) / quiet (false) */
+      const triage = (condition: object) => ({
         schemaVersion: 1,
         nodes: [
           trigger,
-          {
-            key: 'cond',
-            kind: 'CONDITION',
-            type: 'condition',
-            config: { all: [{ left: { value: 1 }, operator: 'equals', right: { value: 1 } }] },
-          },
-          action('then', 'util.log', { message: 't' }),
+          action('classify', 'util.log', { message: '{{ trigger.priority }}' }),
+          { key: 'check', kind: 'CONDITION', type: 'condition', config: condition },
+          action('alert', 'util.log', {
+            message:
+              'Issue #{{ trigger.issue.number }} "{{ trigger.issue.title }}" is {{ steps.classify.output.message }}',
+          }),
+          action('quiet', 'util.log', { message: 'nothing to do' }),
         ],
         edges: [
-          { from: 'trigger', to: 'cond' },
-          { from: 'cond', to: 'then', branch: 'true' },
-        ],
+          { from: 'trigger', to: 'classify' },
+          { from: 'classify', to: 'check' },
+          { from: 'check', to: 'alert', branch: 'true' },
+          { from: 'check', to: 'quiet', branch: 'false' },
+        ] as Edge[],
       });
-      expect(await settled(id)).toMatchObject({
-        status: 'FAILED',
-        lastErrorCategory: 'VALIDATION',
-        errorMessage: 'Condition evaluation is not available yet (Part 11)',
+      const input = (priority: string, labels: string[], author = 'User') => ({
+        priority,
+        issue: { number: 7, title: 'Login fails', labels, author: { type: author } },
+      });
+
+      it('branches on trigger data (AC-11.1)', async () => {
+        const definition = triage({
+          all: [
+            {
+              left: { ref: 'trigger.issue.labels' },
+              operator: 'contains',
+              right: { value: 'production' },
+            },
+          ],
+        });
+        const yes = await startRun(definition, input('LOW', ['bug', 'production']));
+        const no = await startRun(definition, input('LOW', ['bug']));
+        await Promise.all([settled(yes), settled(no)]);
+        expect(await stepStates(yes)).toMatchObject({
+          check: 'SUCCEEDED',
+          alert: 'SUCCEEDED',
+          quiet: 'SKIPPED',
+        });
+        expect(await stepStates(no)).toMatchObject({ alert: 'SKIPPED', quiet: 'SUCCEEDED' });
+      });
+
+      it('branches on a previous step output with nested AND/OR/NOT (AC-11.2)', async () => {
+        const definition = triage({
+          all: [
+            {
+              left: { ref: 'steps.classify.output.message' },
+              operator: 'equals',
+              right: { value: 'HIGH' },
+            },
+            {
+              any: [
+                {
+                  left: { ref: 'trigger.issue.labels' },
+                  operator: 'contains',
+                  right: { value: 'security' },
+                },
+                {
+                  left: { ref: 'trigger.issue.labels' },
+                  operator: 'contains',
+                  right: { value: 'bug' },
+                },
+              ],
+            },
+            {
+              not: {
+                left: { ref: 'trigger.issue.author.type' },
+                operator: 'equals',
+                right: { value: 'Bot' },
+              },
+            },
+          ],
+        });
+        const cases: [object, 'alert' | 'quiet'][] = [
+          [input('HIGH', ['bug']), 'alert'],
+          [input('HIGH', ['docs']), 'quiet'],
+          [input('LOW', ['security']), 'quiet'],
+          [input('HIGH', ['security'], 'Bot'), 'quiet'],
+        ];
+        for (const [payload, expected] of cases) {
+          const id = await startRun(definition, payload);
+          await settled(id);
+          expect((await stepStates(id))[expected]).toBe('SUCCEEDED');
+        }
+      });
+
+      it('maps earlier data into later steps', async () => {
+        const id = await startRun(
+          triage({ all: [{ left: { ref: 'trigger.priority' }, operator: 'exists' }] }),
+          input('HIGH', []),
+        );
+        await settled(id);
+        const alert = (await steps(id)).find((s) => s.nodeKey === 'alert');
+        expect(alert?.sanitizedInput).toEqual({ message: 'Issue #7 "Login fails" is HIGH' });
+        expect(alert?.sanitizedOutput).toEqual({ message: 'Issue #7 "Login fails" is HIGH' });
+      });
+
+      it('rejects invalid expressions at save and publish time (AC-11.3)', async () => {
+        const wf = await request(server).post(workflows()).set(auth()).send({ name: 'bad refs' });
+        const draft = await request(server)
+          .put(`${workflows()}/${wf.body.id}/draft`)
+          .set(auth())
+          .send({
+            expectedRevision: 0,
+            definition: triage({
+              all: [{ left: { ref: 'steps.alert.output.message' }, operator: 'exists' }],
+            }),
+          });
+        expect(draft.body.issues.map((i: { code: string }) => i.code)).toEqual([
+          'NON_ANCESTOR_REFERENCE',
+        ]);
+
+        const publishRes = await request(server)
+          .post(`${workflows()}/${wf.body.id}/publish`)
+          .set(auth())
+          .send({ expectedRevision: 1 });
+        expect(publishRes.status).toBe(422);
+
+        const injected = await request(server)
+          .post(`${workflows()}/${wf.body.id}/validate`)
+          .set(auth())
+          .send({
+            definition: triage({
+              all: [{ left: { ref: 'trigger.constructor.prototype' }, operator: 'exists' }],
+            }),
+          });
+        expect(injected.body.issues.map((i: { code: string }) => i.code)).toContain(
+          'INVALID_REFERENCE',
+        );
       });
     });
 

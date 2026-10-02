@@ -57,6 +57,18 @@ export const envSchema = z
 
     ENCRYPTION_KEY: z.string().optional(),
 
+    /** Where OAuth callbacks send the browser back to (frontend). */
+    FRONTEND_URL: z.string().url().default('http://localhost:5173'),
+
+    // GitHub App (Part 10). Private key: base64 of the PEM file (or the PEM itself).
+    GITHUB_APP_ID: z.string().optional(),
+    GITHUB_APP_SLUG: z
+      .string()
+      .regex(/^[a-z0-9-]+$/)
+      .optional(),
+    GITHUB_APP_PRIVATE_KEY: z.string().optional(),
+    GITHUB_API_URL: z.string().url().default('https://api.github.com'),
+    GITHUB_WEB_URL: z.string().url().default('https://github.com'),
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
@@ -67,6 +79,9 @@ export const envSchema = z
     SLACK_CLIENT_SECRET: z.string().optional(),
     SLACK_SIGNING_SECRET: z.string().optional(),
     OAUTH_REDIRECT_BASE_URL: z.string().url().optional(),
+
+    /** Enables the non-production `test` webhook provider (Part 09). Ignored in production. */
+    WEBHOOK_TEST_SECRET: z.string().min(16).optional(),
 
     AI_API_KEY: z.string().optional(),
     AI_MODEL: z.string().optional(),
