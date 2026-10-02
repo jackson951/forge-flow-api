@@ -14,7 +14,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "worker:dev": "nest start --watch --entryFile worker",
+    "worker:dev": "nest start --watch --config nest-cli.worker-dev.json",
     "worker:prod": "node dist/worker",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",

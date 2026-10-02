@@ -6,6 +6,7 @@ import {
   ApiPayloadTooLargeResponse,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiOperation,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
@@ -34,6 +35,9 @@ export class WebhooksController {
   @ApiNotFoundResponse({ description: 'Unknown or disabled provider' })
   @ApiPayloadTooLargeResponse()
   @Post(':provider')
+  @ApiOperation({
+    summary: 'Inbound provider webhook: verifies the signature, deduplicates, queues runs',
+  })
   async receive(
     @Param('provider') provider: string,
     @Req() req: RawRequest,

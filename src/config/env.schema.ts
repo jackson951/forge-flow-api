@@ -120,10 +120,14 @@ export const envSchema = z
 
     // GitHub App (Part 10). Private key: base64 of the PEM file (or the PEM itself).
     GITHUB_APP_ID: z.string().optional(),
-    GITHUB_APP_SLUG: z
-      .string()
-      .regex(/^[a-z0-9-]+$/)
-      .optional(),
+    // Empty (as in .env.example) means not configured.
+    GITHUB_APP_SLUG: z.preprocess(
+      emptyAsUnset,
+      z
+        .string()
+        .regex(/^[a-z0-9-]+$/)
+        .optional(),
+    ),
     GITHUB_APP_PRIVATE_KEY: z.string().optional(),
     GITHUB_API_URL: z.string().url().default('https://api.github.com'),
     GITHUB_WEB_URL: z.string().url().default('https://github.com'),
