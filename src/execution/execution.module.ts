@@ -22,6 +22,7 @@ import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
 import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
 import { RetentionService } from './retention.service';
+import { ScheduleEvaluator } from './schedule-evaluator';
 import { RunWorkerService } from './run-worker.service';
 import { WorkerConnections } from './worker-connections';
 import { WorkerHeartbeat } from './worker-heartbeat.service';
@@ -104,6 +105,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     RunWorkerService,
     RunSweeper,
     RetentionService,
+    ScheduleEvaluator,
     WorkflowRunProcessor,
     MaintenanceProcessor,
     WorkerHeartbeat,
@@ -114,6 +116,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     RunWorkerService,
     ProviderConcurrencyLimiter,
     RetentionService,
+    ScheduleEvaluator,
   ],
 })
 export class ExecutionModule implements OnModuleInit {

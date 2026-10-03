@@ -6,6 +6,7 @@ import { MICROSOFT_NODE_TYPES } from '../modules/integrations/microsoft/microsof
 import { SLACK_NODE_TYPES } from '../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from './catalog/node-type-catalog';
 import { DefinitionValidatorService } from './executor/definition-validator.service';
+import { scheduleNodeType } from './schedule/schedule-node-type';
 
 /**
  * Definition-level engine services used by both API (validation) and worker. Execution
@@ -21,6 +22,7 @@ import { DefinitionValidatorService } from './executor/definition-validator.serv
       useFactory: (config: AppConfigService) =>
         new NodeTypeCatalog([
           ...BUILT_IN_NODE_TYPES,
+          scheduleNodeType(config.schedule.minIntervalMinutes),
           ...GITHUB_NODE_TYPES,
           ...SLACK_NODE_TYPES,
           ...MICROSOFT_NODE_TYPES,

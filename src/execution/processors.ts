@@ -8,6 +8,7 @@ import { runBackoffStrategy } from '../infrastructure/queue/retry-backoff';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
 import { PrismaRunStore } from './prisma-run-store';
 import { RetentionService } from './retention.service';
+import { ScheduleEvaluator } from './schedule-evaluator';
 import { RunPostponedError, RunWorkerService } from './run-worker.service';
 
 /**
@@ -82,6 +83,7 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
   constructor(
     private readonly sweeper: RunSweeper,
     private readonly retention: RetentionService,
+    private readonly schedules: ScheduleEvaluator,
     private readonly config: AppConfigService,
     @InjectQueue(QUEUES.MAINTENANCE) private readonly maintenance: Queue,
   ) {
@@ -94,6 +96,12 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
       JOBS.SWEEP_QUEUED_RUNS,
       { every: this.config.queue.sweeperIntervalMs },
       { name: JOBS.SWEEP_QUEUED_RUNS, opts: { removeOnComplete: true, removeOnFail: 100 } },
+    );
+    // Part 23: due schedule occurrences → QUEUED runs.
+    await this.maintenance.upsertJobScheduler(
+      JOBS.EVALUATE_SCHEDULES,
+      { every: this.config.schedule.tickIntervalMs },
+      { name: JOBS.EVALUATE_SCHEDULES, opts: { removeOnComplete: true, removeOnFail: 100 } },
     );
     const retention = this.config.retention;
     if (retention.enabled) {
@@ -109,6 +117,7 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
 
   async process(job: Job): Promise<void> {
     if (job.name === JOBS.SWEEP_QUEUED_RUNS) await this.sweeper.sweep();
+    if (job.name === JOBS.EVALUATE_SCHEDULES) await this.schedules.tick();
     if (job.name === JOBS.APPLY_RETENTION && this.config.retention.enabled) {
       await this.retention.run();
     }

@@ -52,12 +52,12 @@ export class QueueBackpressure {
     if (await this.isOverloaded('manual')) throw new QueueBusyException();
   }
 
-  /** For webhook intake: never refuses, only raises the alert. */
-  async observe(): Promise<void> {
-    await this.isOverloaded('webhook');
+  /** For webhook intake and scheduled runs (Part 23): never refuses, only raises the alert. */
+  async observe(source: 'webhook' | 'schedule' = 'webhook'): Promise<void> {
+    await this.isOverloaded(source);
   }
 
-  private async isOverloaded(source: 'manual' | 'webhook'): Promise<boolean> {
+  private async isOverloaded(source: 'manual' | 'webhook' | 'schedule'): Promise<boolean> {
     const threshold = this.config.queue.backpressureThreshold;
     if (threshold === 0) return false;
     const waiting = await this.waiting();

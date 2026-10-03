@@ -12,6 +12,7 @@ export const JOBS = {
   EXECUTE_RUN: 'execute-run',
   SWEEP_QUEUED_RUNS: 'sweep-queued-runs',
   APPLY_RETENTION: 'apply-retention',
+  EVALUATE_SCHEDULES: 'evaluate-schedules',
 } as const;
 
 export interface ExecuteRunJobData {

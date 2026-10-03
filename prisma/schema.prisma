@@ -47,6 +47,7 @@ enum TriggerSource {
   WEBHOOK
   MANUAL
   RETRY
+  SCHEDULE
 }
 
 enum RunStatus {
@@ -141,6 +142,7 @@ model Workspace {
   workflows   Workflow[]
   versions    WorkflowVersion[]
   triggers    WorkflowTrigger[]
+  schedules   WorkflowSchedule[]
   runs        WorkflowRun[]
   connections IntegrationConnection[]
   oauthStates OAuthState[]
@@ -185,6 +187,7 @@ model Workflow {
   activeVersion WorkflowVersion?  @relation("ActiveVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
   versions      WorkflowVersion[] @relation("WorkflowVersions")
   trigger       WorkflowTrigger?
+  schedule      WorkflowSchedule?
   runs          WorkflowRun[]
 
   @@index([workspaceId, status, updatedAt])
@@ -204,11 +207,12 @@ model WorkflowVersion {
   publishedAt    DateTime @default(now()) @db.Timestamptz(3)
   publishedById  String?  @db.Uuid
 
-  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  workflow    Workflow          @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
-  publishedBy User?             @relation("VersionPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
-  activeFor   Workflow?         @relation("ActiveVersion")
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow    Workflow           @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  publishedBy User?              @relation("VersionPublishedBy", fields: [publishedById], references: [id], onDelete: SetNull)
+  activeFor   Workflow?          @relation("ActiveVersion")
   triggers    WorkflowTrigger[]
+  schedules   WorkflowSchedule[]
   runs        WorkflowRun[]
 
   @@unique([workflowId, version])
@@ -236,6 +240,40 @@ model WorkflowTrigger {
 
   @@index([provider, eventType, resourceKey])
   @@index([workspaceId])
+}
+
+/// Time trigger of a workflow's active version (Part 23). Written on publish/archive/unarchive
+/// in the same transaction; the maintenance job turns due occurrences into runs.
+model WorkflowSchedule {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  workflowId        String    @unique @db.Uuid
+  workflowVersionId String    @db.Uuid
+  /// Compiled 5-field cron expression, evaluated in `timezone`.
+  cron              String
+  /// IANA timezone, e.g. "Africa/Johannesburg".
+  timezone          String
+  /// The node's friendly schedule config as published.
+  config            Json
+  /// Human-readable summary, e.g. "Weekdays at 07:00 (Africa/Johannesburg)".
+  description       String
+  /// False while the workflow is archived.
+  active            Boolean   @default(true)
+  nextRunAt         DateTime? @db.Timestamptz(3)
+  lastOccurrenceAt  DateTime? @db.Timestamptz(3)
+  /// Run created for the last occurrence (no foreign key: retention may delete runs).
+  lastRunId         String?   @db.Uuid
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow  Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version   WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+
+  // The evaluator's "due" scan: active schedules by next occurrence.
+  @@index([active, nextRunAt])
+  @@index([workspaceId])
+  @@index([workflowVersionId])
 }
 
 // ── Execution history ────────────────────────────────────────────────────────
