@@ -1,6 +1,6 @@
 # 23 — Schedule / Time Trigger
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** IN PROGRESS — implemented; live check and the CI run pending (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -145,3 +145,52 @@ Seconds-level schedules; one-off "run at" datetimes; calendars/holidays; per-sch
 
 - Put the evaluator next to `RunSweeper` (`src/execution/`), the schedule compiler in `src/engine/schedule/` (pure), and the publish hook next to the webhook-route hook.
 - The occurrence ISO string must be canonical UTC with milliseconds (`toISOString()`), so retries compute the identical key.
+
+## Implementation Evidence (2026-10-03)
+
+**Delivered**
+- `schedule.trigger` node type with a strict zod config: `interval`, `hourly`, `daily`, `weekdays`, `weekly`, `monthly` (day or `last`) and `cron` (5 fields only). The timezone is a required IANA name. Each kind compiles to cron; the evaluator uses croner 10.0.1, pinned exactly, MIT, no dependencies, wrapped in `src/engine/schedule/`.
+- `interval.everyMinutes` is limited to values that divide the hour or the day (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720, 1440), so occurrences align to :00 / 00:00.
+- A schedule must also run at all, and keep a gap of at least `SCHEDULE_MIN_INTERVAL_MINUTES` (default 5).
+- `WorkflowSchedule` table plus `TriggerSource.SCHEDULE` (migration `20261003120000_schedule_trigger`).
+- `TriggerRoutingService` writes the schedule in the publish / archive / unarchive transactions:
+  - a new version updates the same row, with `nextRunAt` recomputed from now (no backfill);
+  - a version with another trigger deletes the row;
+  - archive sets it inactive;
+  - delete removes it by cascade;
+  - a version that is invalid under current settings is kept but inactive, with a warning log.
+- `ScheduleEvaluator` runs on the maintenance queue (`evaluate-schedules`, every `SCHEDULE_TICK_INTERVAL_MS`). For each due schedule it opens one short transaction that:
+  - locks the row with `FOR UPDATE SKIP LOCKED` and uses the database clock (`now()`);
+  - re-checks that the workflow is published, its active version matches, and the workspace matches;
+  - inserts the run with ON CONFLICT DO NOTHING (key `schedule:<id>:<occurrence ISO>`) and advances `nextRunAt` in the same commit;
+  - enqueues after the commit; if the enqueue fails, the sweeper picks the run up.
+- Scheduled runs are never refused; the backpressure alert is raised with `source: schedule`.
+- "Run now" on a schedule workflow is allowed. Its trigger input is `{ triggerType: 'MANUAL', scheduledFor: null, triggeredAt, timezone, scheduleId: null, input: <caller input> }`, so caller input can never pose as a scheduled run.
+- Workflow list and detail return a read-only `schedule` summary: `{ active, timezone, description, nextRunAt, lastOccurrenceAt, lastRunId }`.
+- `GET /node-types` lists the type, and runs can be filtered by `triggerSource=SCHEDULE`.
+
+**Decisions**
+- **Misfires:** only the latest occurrence within `SCHEDULE_MISFIRE_GRACE_MS` runs (default 1 h; env validation requires at least 2 ticks). Older occurrences are skipped and logged, never backfilled, and occurrences before the grace window are not counted one by one.
+- **DST:** a missing wall-clock time runs once, shifted forward by the gap (02:30 → 03:30 EDT). A repeated time runs once, at its first occurrence, and interval schedules also skip the repeated hour. This is the library's behaviour, pinned by tests for New York and London (Johannesburg has no DST).
+- **Library check:** croner's batch `nextRuns()` repeats an instant at spring-forward. We only step with `nextRun(after)`, which is strictly-after, and keep a guard.
+- **Monthly days 29–31** skip months without that day; use `last` for month-end.
+- **Not added:** a `scheduledFor` column on `WorkflowRun` (it is in the trigger input and the key), and the optional preview endpoint. Both are deferred until the frontend needs them.
+- **Summary field names:** the summary uses `lastOccurrenceAt`/`lastRunId` instead of the spec's `lastRunAt`.
+
+**Verification**
+- Unit: `src/engine/schedule/schedule.spec.ts`, 30 tests covering every kind, validation, the minimum interval, the timezones, DST and the misfire policy. Full unit suite: 607/607.
+- The side-effect table (AC-15.9) and the Part 15 doc now list `schedule.trigger`.
+- Integration: `test/integration/schedules.int-spec.ts`, 15/15 against real Postgres and Redis. It covers lifecycle, racing evaluators (3 evaluators × 6 schedules → 6 runs), retried-tick suppression, misfire, sweeper recovery, tenant scoping, log fields with no canary secrets, and an end-to-end run through the worker's own maintenance job → queue → engine → SUCCEEDED with `trigger.scheduledFor` in the step output.
+- Typecheck and lint are clean. The full integration suite is not recorded here; see the hand-off.
+
+| AC | Status |
+| --- | --- |
+| AC-23.1 | Met (unit tests) |
+| AC-23.2 | Met (integration) |
+| AC-23.3 | Met (integration, database-enforced) |
+| AC-23.4 | Met in-process (integration end-to-end with a real worker); live stack run pending |
+| AC-23.5 | Met (integration) |
+| AC-23.6 | Met (log assertion and canaries) |
+
+Pending before COMPLETE: the CI run on the PR, and one live scheduled run on the dev stack after `prisma migrate deploy`.
+

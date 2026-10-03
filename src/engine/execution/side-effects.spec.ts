@@ -23,6 +23,7 @@ import { NodeHandler } from './node-handler';
  */
 const REVIEWED: Record<string, NodeHandler['sideEffect']> = {
   'manual.trigger': 'none',
+  'schedule.trigger': 'none',
   condition: 'none',
   'util.log': 'none',
   'github.issue.created': 'none',

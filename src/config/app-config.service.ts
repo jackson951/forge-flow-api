@@ -49,6 +49,15 @@ export class AppConfigService {
     return databaseUrlWithPool(this.get('DATABASE_URL'), this.get('DATABASE_CONNECTION_LIMIT'));
   }
 
+  get schedule() {
+    return {
+      tickIntervalMs: this.get('SCHEDULE_TICK_INTERVAL_MS'),
+      misfireGraceMs: this.get('SCHEDULE_MISFIRE_GRACE_MS'),
+      minIntervalMinutes: this.get('SCHEDULE_MIN_INTERVAL_MINUTES'),
+      batchSize: this.get('SCHEDULE_BATCH_SIZE'),
+    };
+  }
+
   get retention() {
     const days = (n: number) => n * 24 * 3_600_000;
     return {

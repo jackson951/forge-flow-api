@@ -2,6 +2,7 @@ import { ErrorCategory } from '@prisma/client';
 import { PermanentError } from '../errors';
 import { conditionConfigSchema, evaluateCondition } from '../expressions/conditions';
 import { ReferenceSyntaxError } from '../expressions/reference';
+import { scheduleTriggerHandler } from '../schedule/schedule-node-type';
 import { NodeHandler } from './node-handler';
 
 /** The trigger's output is the run's trigger input (manual input or normalised event). */
@@ -50,6 +51,7 @@ export const conditionHandler: NodeHandler = {
 
 export const BUILT_IN_HANDLERS: NodeHandler[] = [
   manualTriggerHandler,
+  scheduleTriggerHandler,
   logHandler as NodeHandler,
   conditionHandler,
 ];

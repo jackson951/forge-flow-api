@@ -2,6 +2,7 @@ import { IntegrationProviderKey } from '@prisma/client';
 import { z, ZodType } from 'zod';
 import { NodeKind } from '../definition/definition.schema';
 import { conditionConfigSchema } from '../expressions/conditions';
+import type { ScheduleSpec } from '../schedule/schedule';
 
 /** Where a webhook-driven trigger listens; stored as a WorkflowTrigger row on publish. */
 export interface TriggerRoute {
@@ -23,6 +24,11 @@ export interface NodeTypeDefinition {
    * it (e.g. manual.trigger) are started through the API instead.
    */
   route?: (config: Record<string, unknown>) => TriggerRoute;
+  /**
+   * Time-based triggers only (Part 23): maps validated config to its schedule, stored as a
+   * WorkflowSchedule row on publish.
+   */
+  schedule?: (config: Record<string, unknown>) => ScheduleSpec;
   /**
    * Nodes that act through an integration: their config's `connectionId` must reference a
    * CONNECTED connection of this provider in the workflow's own workspace (checked on publish).

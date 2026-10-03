@@ -104,6 +104,15 @@ export const envSchema = z
     RETENTION_MAX_BATCHES: z.coerce.number().int().min(1).max(1_000).default(50),
     RETENTION_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
 
+    /** Schedule trigger (Part 23): a maintenance job turns due occurrences into runs. */
+    SCHEDULE_TICK_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
+    /** A missed occurrence older than this is skipped instead of run late (FR-23.7). */
+    SCHEDULE_MISFIRE_GRACE_MS: z.coerce.number().int().min(60_000).default(3_600_000),
+    /** Smallest allowed gap between occurrences of one schedule, in minutes (FR-23.3). */
+    SCHEDULE_MIN_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1_440).default(5),
+    /** Due schedules handled per tick per worker (each in its own short transaction). */
+    SCHEDULE_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(200),
+
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_ACCESS_TTL: duration.default('15m'),
     JWT_REFRESH_SECRET: z.string().min(32),
@@ -185,6 +194,15 @@ export const envSchema = z
           message: (err as Error).message,
         });
       }
+    }
+
+    // A due occurrence waits up to one tick; a shorter grace would skip on-time occurrences.
+    if (env.SCHEDULE_MISFIRE_GRACE_MS < 2 * env.SCHEDULE_TICK_INTERVAL_MS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SCHEDULE_MISFIRE_GRACE_MS'],
+        message: 'must be at least twice SCHEDULE_TICK_INTERVAL_MS',
+      });
     }
 
     if (env.RETENTION_STEP_PAYLOAD_DAYS > env.RETENTION_RUN_DAYS) {
