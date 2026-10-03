@@ -174,7 +174,11 @@ describe('Microsoft Graph integration (integration)', () => {
   describe('connect flow (AC-14.1, AC-14.2)', () => {
     it('requests only the listed delegated scopes, with PKCE S256 and state', async () => {
       const providers = await request(server).get('/api/v1/integrations/providers').set(asAdmin());
-      expect(providers.body).toContainEqual({ key: 'MICROSOFT', configured: true });
+      expect(providers.body).toContainEqual({
+        key: 'MICROSOFT',
+        configured: true,
+        connectionType: 'OAUTH',
+      });
 
       const url = await startConnect();
       expect(url.origin + url.pathname).toBe(`${fake.url}/common/oauth2/v2.0/authorize`);

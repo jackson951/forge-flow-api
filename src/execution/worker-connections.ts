@@ -3,6 +3,8 @@ import { ConnectionStatus, ErrorCategory, IntegrationProviderKey } from '@prisma
 import { PermanentError } from '../engine/errors';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { CredentialStore } from '../modules/integrations/credentials/credential-store';
+import { HttpConnectionMetadata } from '../modules/integrations/http/http-auth';
+import { HttpConnectionAccess } from '../modules/integrations/http/http.node-types';
 
 /** What integration handlers may do with connections. Always scoped to the run's workspace. */
 export interface ConnectionAccess {
@@ -22,7 +24,7 @@ export interface ConnectionAccess {
  * same way, so handlers cannot be pointed at other tenants' credentials.
  */
 @Injectable()
-export class WorkerConnections implements ConnectionAccess {
+export class WorkerConnections implements ConnectionAccess, HttpConnectionAccess {
   constructor(
     private readonly credentials: CredentialStore,
     private readonly prisma: PrismaService,
@@ -50,6 +52,28 @@ export class WorkerConnections implements ConnectionAccess {
       data: { lastUsedAt: new Date() },
     });
     return connection.accessToken;
+  }
+
+  /** A CONNECTED HTTP connection of `workspaceId` with its secrets (Part 24). */
+  async httpConnection(
+    workspaceId: string,
+    connectionId: string,
+  ): Promise<{ metadata: HttpConnectionMetadata; secrets: Record<string, string> }> {
+    const connection = await this.credentials.getHttp(workspaceId, connectionId);
+    if (!connection || connection.status !== ConnectionStatus.CONNECTED) {
+      throw new PermanentError(
+        ErrorCategory.PROVIDER_AUTH,
+        'The HTTP connection is missing or needs attention',
+      );
+    }
+    await this.prisma.integrationConnection.update({
+      where: { id: connectionId },
+      data: { lastUsedAt: new Date() },
+    });
+    return {
+      metadata: connection.metadata as unknown as HttpConnectionMetadata,
+      secrets: connection.secrets,
+    };
   }
 
   async markNeedsAttention(workspaceId: string, connectionId: string): Promise<void> {

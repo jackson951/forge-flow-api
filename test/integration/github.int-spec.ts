@@ -190,7 +190,9 @@ describe('GitHub integration (integration)', () => {
   describe('connect flow', () => {
     it('reports GitHub as configured', async () => {
       const res = await request(server).get('/api/v1/integrations/providers').set(asAdmin());
-      expect(res.body).toEqual(expect.arrayContaining([{ key: 'GITHUB', configured: true }]));
+      expect(res.body).toEqual(
+        expect.arrayContaining([{ key: 'GITHUB', configured: true, connectionType: 'OAUTH' }]),
+      );
     });
 
     it('starts at the app install page with a single-use state stored only as a hash', async () => {

@@ -49,6 +49,25 @@ export class AppConfigService {
     return databaseUrlWithPool(this.get('DATABASE_URL'), this.get('DATABASE_CONNECTION_LIMIT'));
   }
 
+  get http() {
+    const list = (v: string) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return {
+      enabled: this.get('HTTP_ACTION_ENABLED') ?? true,
+      maxResponseBytes: this.get('HTTP_ACTION_MAX_RESPONSE_BYTES'),
+      maxStoredBodyBytes: this.get('HTTP_ACTION_MAX_STORED_BODY_BYTES'),
+      policy: {
+        allowPlainHttp: this.get('HTTP_ACTION_ALLOW_PLAIN_HTTP') ?? false,
+        allowPrivateNetworks: this.get('HTTP_ACTION_ALLOW_PRIVATE_NETWORKS') ?? false,
+        deniedPorts: list(this.get('HTTP_ACTION_DENIED_PORTS')).map(Number),
+        deniedHosts: list(this.get('HTTP_ACTION_DENIED_HOSTS')),
+      },
+    };
+  }
+
   get schedule() {
     return {
       tickIntervalMs: this.get('SCHEDULE_TICK_INTERVAL_MS'),

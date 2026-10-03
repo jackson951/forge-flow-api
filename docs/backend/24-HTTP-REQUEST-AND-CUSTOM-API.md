@@ -1,6 +1,6 @@
 # 24 — Generic HTTP: Outbound Requests and Inbound Triggers (Custom API)
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** IN PROGRESS: slice 1 of 3 (outbound) implemented; slices 2 (`webhook.received`) and 3 (`http.poll`) not started (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -185,3 +185,82 @@ GraphQL helpers, multipart file upload, pagination helpers, OAuth-client-credent
 
 - Use undici (`Agent` with a `connect` hook) or Node `http(s)` with a custom `lookup` that returns only the vetted address; avoid libraries that follow redirects internally.
 - The guard is a separate module with no framework dependency, tested exhaustively; providers' fixed base URLs keep bypassing it (server configuration).
+
+## Threat model (outbound, slice 1)
+
+This was written while implementing slice 1, not before coding as the DoD asks. It is reviewed here against the code and the tests.
+
+| Threat | Mitigation | Test |
+| --- | --- | --- |
+| SSRF to cloud metadata / internal services | The URL host is checked statically. Then every A/AAAA record is resolved, and if any address is in a blocked range the request is refused. Blocked ranges include 0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24, documentation nets, 192.168/16, 198.18/15, 224/4, 240/4, ::, ::1, 64:ff9b::/96, fc00::/7 (incl. fd00:ec2::254), fe80::/10 and ff00::/8. | `egress-policy.spec`, `egress-client.spec` |
+| IPv4-mapped / compatible IPv6, NAT64 | Embedded IPv4 is extracted and checked; NAT64 is blocked. | `egress-policy.spec` |
+| Decimal / octal / hex / short IP forms | The WHATWG URL parser normalises them, then they are checked as literals. | `egress-policy.spec` |
+| Internal names (`postgres`, `redis`, `api`, `localhost`, `*.internal`, `*.local`, single-label) | Refused by name before any lookup. | `egress-policy.spec` |
+| DNS rebinding | The name is resolved once and the socket is pinned to the vetted address (custom `lookup`, TLS SNI = original name). A second answer is never used. | `egress-client.spec` |
+| Redirect to internal | Redirects are followed by hand (max 3) and every hop is re-checked. 303 (and 301/302 after POST) becomes GET. | `egress-client.spec`, `http.int-spec` |
+| Credential exfiltration to attacker hosts | Credentials are dropped on cross-origin redirects. The connection's `allowedHosts` is checked on every hop, before any byte is sent. | `egress-client.spec`, `http.int-spec` |
+| Secrets in workflows / step data / logs | Credential headers are refused in node config (FR-24.2). Auth is applied only inside the handler, so step input never holds it. Connection secret values are scrubbed from stored output, plain and URL-encoded. Logs carry scheme, host, path and query keys only. | `http.spec`, `http.int-spec` (canaries) |
+| Header injection / request smuggling | CR/LF/NUL are refused in names and values (config and rendered). Framing and hop-by-hop headers are reserved. Only Node's own HTTP client is used. | `http.spec` |
+| Zip bombs, huge or slow responses | Bytes are counted after decompression and capped (`HTTP_ACTION_MAX_RESPONSE_BYTES`). There is a total time limit across redirects, and the engine's AbortSignal is honoured. | `egress-client.spec` |
+| Port scanning / abuse of internal ports | Denied ports by default (25, 465, 587, 2375, 2376, 5432, 6379, 9200, 11211, 27017). The connection test is rate limited (10/min) and returns only the outcome, never the body. Errors are uniform. | `egress-policy.spec`, `http.int-spec` |
+| Reading internal pages through the test endpoint | The test endpoint returns `{ ok, status, category }` only. | `http.int-spec` |
+
+## Implementation Evidence: slice 1 (outbound), 2026-10-04
+
+**Delivered**
+- Egress guard `src/infrastructure/egress/`:
+  - `egress-policy.ts` (pure policy) and `egress-client.ts` (resolve-all, pin, manual redirects, caps, decompression limit, timeout);
+  - a global `EgressModule`;
+  - a test allowance (`allowForTests`, refused unless `NODE_ENV=test`). It can also answer one test host name locally, so static checks see an ordinary public host while only the local test service is reachable.
+- Settings: `HTTP_ACTION_ENABLED`, `HTTP_ACTION_ALLOW_PLAIN_HTTP` (default false), `HTTP_ACTION_ALLOW_PRIVATE_NETWORKS` (default false), `HTTP_ACTION_DENIED_PORTS`, `HTTP_ACTION_DENIED_HOSTS`, `HTTP_ACTION_MAX_RESPONSE_BYTES` (1 MB), `HTTP_ACTION_MAX_STORED_BODY_BYTES` (48 KB).
+- HTTP connections (`IntegrationProviderKey.HTTP`):
+  - auth types `bearer`, `basic`, `apiKeyHeader`, `apiKeyQuery`, `customHeaders` (up to 10), plus optional `baseUrl` and `allowedHosts`;
+  - secrets are sealed in the new `IntegrationCredential.encryptedPayload` (AAD `<connectionId>:payload`, included in key rotation `reencryptAll`);
+  - metadata shows only the auth type, header/param names and a hint of the last 4 characters;
+  - migration `20261004090000_http_connections`.
+- Routes (all ADMIN):
+  - `POST /workspaces/:ws/integrations/http`
+  - `POST .../integrations/:connectionId/test` (rate limited, outcome only)
+  - `PATCH .../integrations/:connectionId`
+  - `PUT .../integrations/:connectionId/credentials`
+  - delete uses the existing route.
+- `GET /integrations/providers` lists `HTTP` with `connectionType: CREDENTIALS`; OAuth providers now report `connectionType: OAUTH`.
+- `http.request` node type:
+  - config per FR-24.1, plus `failOn4xx`, `idempotent` and `onLargeResponse`;
+  - templates in url, query, header values and body;
+  - static URLs are checked at validate/publish;
+  - the connection is optional (`connectionOptional`, honoured by the publish connection check).
+- Worker handler: classification per the Error Handling table, `Retry-After` honoured, `Idempotency-Key` sent for POST/PATCH marked `idempotent`. It is in the `http` provider-slot group and is declared `non-idempotent` in the AC-15.9 table and the Part 15 doc.
+- `no-outbound-urls.spec.ts` was amended deliberately: `http.request.url` is the single allowed URL, and the test checks that the handler sends only through `egress.send(`. Part 18 FR-18.7 now points here.
+
+**Decisions** (taken from this spec's own proposals)
+- **Plain HTTP:** HTTPS only. HTTP is allowed only with `HTTP_ACTION_ALLOW_PLAIN_HTTP=true` (dev/self-hosted).
+- **Private networks:** off by default (`HTTP_ACTION_ALLOW_PRIVATE_NETWORKS`), for self-hosters only.
+- **Ports:** all public ports are allowed except the denied list.
+- **POST/PATCH retries:** opt-in with `idempotent: true`, which sends `Idempotency-Key: <runId>:<nodeKey>`.
+- **5xx after a POST/PATCH:** 503 and 429 are retried (the server says it did not process the request). 502, 504 and 500 count as `UNCERTAIN_OUTCOME` and are retried only on a human decision.
+- **Stored body:** 48 KB by default, not the 512 KB the spec proposed. The engine stores at most 64 KB per step (Part 16); raising that would change storage and retention for every run. Up to 1 MB is read; larger bodies are truncated (`bodyTruncated`) or fail with `RESPONSE_TOO_LARGE` (`onLargeResponse: 'error'`).
+- **401/403:** fail the step with `PROVIDER_AUTH` but do not mark the connection `NEEDS_ATTENTION` yet. `statusReason` and "after repeated failures" are deferred until Parts 25/26 add the shared status reason.
+
+**Found and fixed while testing**
+- A server that echoes the request URL (seen with the local echo service) returned an `apiKeyQuery` credential, which was being stored in the step output. The handler now scrubs the connection's own secret values from everything it stores (`scrubSecrets`).
+
+**Verification**
+- Unit tests:
+  - egress policy and client: 53 tests (every blocked range, mapped IPv6 / NAT64, encodings, internal names, ports, DNS with a stub resolver, rebinding, redirects, credential stripping, decompression bomb, timeouts, abort);
+  - HTTP model: 21 tests (config, auth types, URL resolution, bodies, Retry-After, the classification table, output normalisation, scrubbing).
+  - Full unit suite: 49 suites / 683 tests.
+- Integration: `test/integration/http.int-spec.ts`, 17/17 against a local test service reached only through the test allowance. It covers connection create/list/test/rotate/update/delete with write-only secrets; S24.1 (POST with templated JSON + bearer, then a condition on the status, then a log); all methods, query, headers, text/form bodies and relative URLs; every auth type; output normalisation and size caps; 429 + Retry-After and 5xx retry for GET; POST 5xx giving `UNCERTAIN_OUTCOME` with a single call; idempotent POST retried with the same key; 4xx with and without `failOn4xx`; redirect to metadata blocked; a templated URL rendering to a private address blocked; `allowedHosts` stopping credential exfiltration; secret canaries across steps, API responses, versions and logs; and a foreign-workspace connection refused at publish and at execution.
+- Full integration suite: 22 suites, 333 tests. The first run failed 3 tests in existing suites because of this slice: the route authorization inventory did not list the 4 new routes, and the provider list now carries `connectionType`. Those tests were updated and re-run green (69/69).
+
+| AC | Status |
+| --- | --- |
+| AC-24.1 | Met (integration) |
+| AC-24.2 | Met for outbound (unit + integration); `http.poll` reuses the guard in slice 3 |
+| AC-24.3 | Met (integration) |
+| AC-24.4 | Met for outbound (canaries + log assertions) |
+| AC-24.5 | Met (publish + execution) |
+| AC-24.6, AC-24.8 | Not started (slice 2: `webhook.received`) |
+| AC-24.9 | Not started (slice 3: `http.poll`) |
+| AC-24.7 | Not started (needs slice 2) |
+

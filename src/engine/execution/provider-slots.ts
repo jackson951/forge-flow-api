@@ -20,7 +20,7 @@ export interface StepSlots {
 }
 
 /** Node type prefixes that call an external provider. Built-in types are never limited. */
-export const PROVIDER_PREFIXES = ['github', 'slack', 'microsoft', 'ai'] as const;
+export const PROVIDER_PREFIXES = ['github', 'slack', 'microsoft', 'ai', 'http'] as const;
 
 export function providerOf(nodeType: string): string | undefined {
   const prefix = nodeType.split('.', 1)[0];

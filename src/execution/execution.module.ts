@@ -17,6 +17,8 @@ import { MicrosoftClient } from '../modules/integrations/microsoft/microsoft-cli
 import { MicrosoftTokenManager } from '../modules/integrations/microsoft/microsoft-token-manager';
 import { createMicrosoftHandlers } from '../modules/integrations/microsoft/microsoft.node-types';
 import { SlackClient } from '../modules/integrations/slack/slack-client';
+import { createHttpHandlers } from '../modules/integrations/http/http.node-types';
+import { EgressClient } from '../infrastructure/egress/egress-client';
 import { createSlackHandlers } from '../modules/integrations/slack/slack.node-types';
 import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
@@ -46,6 +48,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         WorkerConnections,
         MicrosoftClient,
         MicrosoftTokenManager,
+        EgressClient,
       ],
       useFactory: (
         ai: AiProvider | null,
@@ -54,12 +57,18 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         connections: WorkerConnections,
         microsoft: MicrosoftClient,
         microsoftTokens: MicrosoftTokenManager,
+        egress: EgressClient,
       ): NodeHandler[] => [
         ...BUILT_IN_HANDLERS,
         ...GITHUB_HANDLERS,
         ...createSlackHandlers(slack, connections),
         ...createMicrosoftHandlers(microsoft, microsoftTokens),
         ...createAiHandlers(ai, config.ai),
+        ...createHttpHandlers(egress, connections, {
+          policy: config.http.policy,
+          maxResponseBytes: config.http.maxResponseBytes,
+          maxStoredBodyBytes: config.http.maxStoredBodyBytes,
+        }),
       ],
     },
     {

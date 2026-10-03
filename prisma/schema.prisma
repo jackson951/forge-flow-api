@@ -29,6 +29,8 @@ enum IntegrationProviderKey {
   SLACK
   /// Non-production webhook provider for end-to-end tests (Part 09); never enabled in production.
   TEST
+  /// Generic HTTP connections (Part 24): API-key / bearer / basic credentials, no OAuth.
+  HTTP
 }
 
 enum ConnectionStatus {
@@ -391,6 +393,8 @@ model IntegrationCredential {
   keyId                 String
   encryptedAccessToken  String?
   encryptedRefreshToken String?
+  /// HTTP connections (Part 24): AES-GCM sealed JSON of the auth secrets.
+  encryptedPayload      String?
   accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
   createdAt             DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
