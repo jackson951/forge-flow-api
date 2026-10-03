@@ -81,6 +81,11 @@ const EXPECTED_ACCESS: Record<string, 'public' | 'user' | 'member' | 'admin' | '
   'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/slack/channels': 'member',
   'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/microsoft/todo-lists': 'member',
   'DELETE /api/v1/workspaces/:workspaceId/integrations/:connectionId': 'admin',
+  // Part 24: HTTP connections (credential form).
+  'POST /api/v1/workspaces/:workspaceId/integrations/http': 'admin',
+  'POST /api/v1/workspaces/:workspaceId/integrations/:connectionId/test': 'admin',
+  'PATCH /api/v1/workspaces/:workspaceId/integrations/:connectionId': 'admin',
+  'PUT /api/v1/workspaces/:workspaceId/integrations/:connectionId/credentials': 'admin',
 };
 
 describe('API hardening (integration, Part 18)', () => {

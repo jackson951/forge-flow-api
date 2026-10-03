@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ZodTypeAny } from 'zod';
 import { aiNodeTypes } from '../../modules/ai/ai.node-types';
 import { GITHUB_NODE_TYPES } from '../../modules/integrations/github/github.node-types';
+import { httpNodeTypes } from '../../modules/integrations/http/http.node-types';
 import { MICROSOFT_NODE_TYPES } from '../../modules/integrations/microsoft/microsoft.node-types';
 import { SLACK_NODE_TYPES } from '../../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES } from './node-type-catalog';
@@ -35,11 +38,19 @@ function configKeys(schema: ZodTypeAny, prefix = ''): string[] {
 }
 
 /**
- * Part 18, FR-18.7: no node lets a workflow author choose where FlowForge sends requests.
- * Provider endpoints are server configuration. A node with a URL-like setting must first
- * implement the SSRF policy in docs/backend/18-RATE-LIMITING-AND-API-HARDENING.md, and
- * then be added here deliberately.
+ * Part 18, FR-18.7 (as amended by Part 24): provider endpoints are server configuration. The
+ * only node that lets a workflow author choose a destination is `http.request`, and it must
+ * send through the egress guard (src/infrastructure/egress). Any other URL-like setting must
+ * first implement that policy and then be added to ALLOWED deliberately.
  */
+const ALLOWED: Record<string, string[]> = { 'http.request': ['url'] };
+const policy = {
+  allowPlainHttp: false,
+  allowPrivateNetworks: false,
+  deniedPorts: [],
+  deniedHosts: [],
+};
+
 describe('no user-configurable outbound URLs (SSRF)', () => {
   const nodeTypes = [
     ...BUILT_IN_NODE_TYPES,
@@ -47,6 +58,7 @@ describe('no user-configurable outbound URLs (SSRF)', () => {
     ...SLACK_NODE_TYPES,
     ...MICROSOFT_NODE_TYPES,
     ...aiNodeTypes(true),
+    ...httpNodeTypes(policy, true),
   ];
 
   it('inspects every node type', () => {
@@ -60,6 +72,17 @@ describe('no user-configurable outbound URLs (SSRF)', () => {
     const urlish = configKeys(t.configSchema).filter((k) =>
       /(^|\.)(url|uri|href|endpoint|host|hostname|baseurl|webhook)[^.]*$/i.test(k),
     );
-    expect(urlish).toEqual([]);
+    expect(urlish).toEqual(ALLOWED[t.type] ?? []);
+  });
+
+  it('http.request sends only through the egress guard, never a raw HTTP client', () => {
+    const source = readFileSync(
+      join(__dirname, '../../modules/integrations/http/http.node-types.ts'),
+      'utf8',
+    );
+    expect(source).toMatch(/egress\.send\(/);
+    expect(source).not.toMatch(
+      /from 'node:(https?|net|tls)'|from '(axios|undici|got|node-fetch)'|\bfetch\(/,
+    );
   });
 });

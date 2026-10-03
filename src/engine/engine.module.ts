@@ -3,6 +3,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { aiNodeTypes } from '../modules/ai/ai.node-types';
 import { GITHUB_NODE_TYPES } from '../modules/integrations/github/github.node-types';
 import { MICROSOFT_NODE_TYPES } from '../modules/integrations/microsoft/microsoft.node-types';
+import { httpNodeTypes } from '../modules/integrations/http/http.node-types';
 import { SLACK_NODE_TYPES } from '../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from './catalog/node-type-catalog';
 import { DefinitionValidatorService } from './executor/definition-validator.service';
@@ -26,6 +27,7 @@ import { scheduleNodeType } from './schedule/schedule-node-type';
           ...GITHUB_NODE_TYPES,
           ...SLACK_NODE_TYPES,
           ...MICROSOFT_NODE_TYPES,
+          ...httpNodeTypes(config.http.policy, config.http.enabled),
           ...aiNodeTypes(Boolean(config.ai.provider)),
         ]),
     },

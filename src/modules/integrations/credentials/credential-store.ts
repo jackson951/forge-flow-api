@@ -16,7 +16,17 @@ export interface DecryptedConnection extends Credential {
   externalAccountId: string;
 }
 
-type Field = 'accessToken' | 'refreshToken';
+type Field = 'accessToken' | 'refreshToken' | 'payload';
+
+/** HTTP connection secrets (Part 24): field name → secret value, sealed as one JSON payload. */
+export type SecretPayload = Record<string, string>;
+
+export interface HttpConnectionSecrets {
+  connectionId: string;
+  status: ConnectionStatus;
+  metadata: Prisma.JsonValue;
+  secrets: SecretPayload;
+}
 
 /** Binds each ciphertext to its connection and field (AES-GCM additional data). */
 const aad = (connectionId: string, field: Field) => `${connectionId}:${field}`;
@@ -52,6 +62,44 @@ export class CredentialStore {
       create: { connectionId, ...data },
       update: data,
     });
+  }
+
+  /** Seals HTTP connection secrets (replacing previous ones) under the active key. */
+  async savePayload(
+    connectionId: string,
+    payload: SecretPayload,
+    tx: Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const data = {
+      keyId: this.encryption.currentKeyId,
+      encryptedPayload: this.seal(connectionId, 'payload', JSON.stringify(payload)),
+    };
+    await tx.integrationCredential.upsert({
+      where: { connectionId },
+      create: { connectionId, ...data },
+      update: data,
+    });
+  }
+
+  /** An HTTP connection of this workspace with its decrypted secrets, or null. */
+  async getHttp(workspaceId: string, connectionId: string): Promise<HttpConnectionSecrets | null> {
+    const connection = await this.prisma.integrationConnection.findFirst({
+      where: { id: connectionId, workspaceId, provider: IntegrationProviderKey.HTTP },
+      select: {
+        id: true,
+        status: true,
+        metadata: true,
+        credential: { select: { encryptedPayload: true } },
+      },
+    });
+    if (!connection) return null;
+    const sealed = this.open(connection.id, 'payload', connection.credential?.encryptedPayload);
+    return {
+      connectionId: connection.id,
+      status: connection.status,
+      metadata: connection.metadata,
+      secrets: sealed ? (JSON.parse(sealed) as SecretPayload) : {},
+    };
   }
 
   async get(
@@ -142,6 +190,7 @@ export class CredentialStore {
             keyId: activeKeyId,
             encryptedAccessToken: reseal('accessToken', row.encryptedAccessToken),
             encryptedRefreshToken: reseal('refreshToken', row.encryptedRefreshToken),
+            encryptedPayload: reseal('payload', row.encryptedPayload),
           };
         } catch {
           failedConnectionIds.push(row.connectionId);

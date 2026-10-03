@@ -190,9 +190,11 @@ export class PublishingService {
   > {
     const issues = [];
     for (const node of definition.nodes) {
-      const provider = this.catalog.get(node.type)?.connectionProvider;
+      const type = this.catalog.get(node.type);
+      const provider = type?.connectionProvider;
       if (!provider) continue;
       const connectionId = node.config.connectionId;
+      if (connectionId === undefined && type.connectionOptional) continue;
       const connection =
         typeof connectionId === 'string'
           ? await tx.integrationConnection.findFirst({

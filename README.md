@@ -77,7 +77,7 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/node-types` | workflows |
 | `/workspaces/:workspaceId/workflows/:workflowId/runs` (start a manual run, also for schedule workflows; optional `Idempotency-Key`) | runs |
 | `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |
-| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`, `/:connectionId` DELETE) | integrations |
+| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`, `/http`, `/:connectionId/test`, `/:connectionId` PATCH / DELETE, `/:connectionId/credentials` PUT) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
 | `/workspaces/:workspaceId/dashboard` | dashboard |
 | `/webhooks/:provider` (`github`, `test` in non-production) | webhooks |

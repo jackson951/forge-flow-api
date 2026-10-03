@@ -104,6 +104,40 @@ export const envSchema = z
     RETENTION_MAX_BATCHES: z.coerce.number().int().min(1).max(1_000).default(50),
     RETENTION_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
 
+    /**
+     * HTTP action and HTTP connections (Part 24). User-chosen destinations always go through
+     * the egress guard: https only, no private/loopback/link-local/metadata addresses.
+     */
+    HTTP_ACTION_ENABLED: booleanString,
+    /** Also allow http:// (dev / self-hosted). */
+    HTTP_ACTION_ALLOW_PLAIN_HTTP: booleanString,
+    /** Allow private networks (self-hosted deployments calling internal APIs). Risky. */
+    HTTP_ACTION_ALLOW_PRIVATE_NETWORKS: booleanString,
+    /** Ports never connected to (comma-separated). */
+    HTTP_ACTION_DENIED_PORTS: z
+      .string()
+      .default('25,465,587,2375,2376,5432,6379,9200,11211,27017')
+      .refine(
+        (v) => v.split(',').every((p) => !p.trim() || /^\d{1,5}$/.test(p.trim())),
+        'comma-separated port numbers',
+      ),
+    /** Host names or *.suffix patterns always refused (comma-separated). */
+    HTTP_ACTION_DENIED_HOSTS: z.string().default(''),
+    /** Bytes read from a response body (decompressed). */
+    HTTP_ACTION_MAX_RESPONSE_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_024)
+      .max(10_485_760)
+      .default(1_048_576),
+    /** Bytes of the body kept in the step output (the engine stores at most 64 KB per step). */
+    HTTP_ACTION_MAX_STORED_BODY_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_024)
+      .max(57_344)
+      .default(49_152),
+
     /** Schedule trigger (Part 23): a maintenance job turns due occurrences into runs. */
     SCHEDULE_TICK_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
     /** A missed occurrence older than this is skipped instead of run late (FR-23.7). */

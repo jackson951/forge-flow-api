@@ -6,6 +6,7 @@ import { MicrosoftTokenManager } from './microsoft/microsoft-token-manager';
 import { SlackClient } from './slack/slack-client';
 import { IntegrationProvidersController, IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
+import { HttpConnectionsService } from './http/http-connections.service';
 import { GitHubProvider } from './providers/github.provider';
 import {
   INTEGRATION_PROVIDERS,
@@ -31,6 +32,7 @@ import { SlackProvider } from './providers/slack.provider';
       useFactory: (...providers: IntegrationProvider[]) => providers,
     },
     IntegrationsService,
+    HttpConnectionsService,
   ],
   exports: [IntegrationsService, GitHubClient, SlackClient, CredentialStore],
 })

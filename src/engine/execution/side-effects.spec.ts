@@ -12,6 +12,7 @@ import {
   createSlackHandlers,
   SLACK_NODE_TYPES,
 } from '../../modules/integrations/slack/slack.node-types';
+import { createHttpHandlers } from '../../modules/integrations/http/http.node-types';
 import { BUILT_IN_HANDLERS } from './built-in-handlers';
 import { NodeHandlerRegistry } from './handler-registry';
 import { NodeHandler } from './node-handler';
@@ -32,6 +33,7 @@ const REVIEWED: Record<string, NodeHandler['sideEffect']> = {
   'ai.summarize': 'idempotent',
   'ai.classify': 'idempotent',
   'ai.extract': 'idempotent',
+  'http.request': 'non-idempotent',
 };
 
 const productionHandlers = (): NodeHandler[] => [
@@ -40,6 +42,7 @@ const productionHandlers = (): NodeHandler[] => [
   ...createSlackHandlers({} as never, {} as never),
   ...createMicrosoftHandlers({} as never, {} as never),
   ...createAiHandlers(null, { maxInputChars: 1000, maxOutputTokens: 64 }),
+  ...createHttpHandlers({} as never, {} as never, {} as never),
 ];
 
 describe('handler side-effect classification (AC-15.9)', () => {
