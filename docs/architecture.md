@@ -13,7 +13,14 @@ Both import `CoreModule` (config, logging, Prisma, queue, crypto) so infrastruct
 Webhook → API /webhooks/:provider → verify → dedupe (WebhookDelivery unique) → enqueue
                                                                               ↓
                                           Worker → WorkflowExecutor → NodeHandlers → GitHub / Graph / Slack / AI
+
+Schedule (Part 23): worker maintenance job "evaluate-schedules" (every SCHEDULE_TICK_INTERVAL_MS)
+  → due WorkflowSchedule row (FOR UPDATE SKIP LOCKED) → QUEUED run, key schedule:<id>:<occurrence>
+  → enqueue after commit → same worker / engine path as above
 ```
+
+The worker's maintenance queue also runs the stale-run sweeper and retention. Every worker
+upserts the same job schedulers, so each job runs once per interval however many workers exist.
 
 ## Folder map
 

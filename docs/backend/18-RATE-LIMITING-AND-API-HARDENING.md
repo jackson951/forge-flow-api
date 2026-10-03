@@ -24,7 +24,7 @@ Rate limiting (auth, general, webhook), body/payload limits, validation review, 
 | FR-18.4 | Pagination `limit` max 100 everywhere. |
 | FR-18.5 | Workflow limits (Part 05) enforced: 50 nodes, 100 edges, 256 KB definition. |
 | FR-18.6 | Every outbound provider call has a timeout (≤ 30 s). |
-| FR-18.7 | No user-configurable outbound URL exists. If an HTTP-request node is ever added, it must pass the SSRF policy below first. |
+| FR-18.7 | No user-configurable outbound URL exists. If an HTTP-request node is ever added, it must pass the SSRF policy below first. *(Planned: [Part 24](24-HTTP-REQUEST-AND-CUSTOM-API.md) implements this policy; open decision on plain HTTP for self-hosted/dev.)* |
 
 ## Technical Requirements
 
