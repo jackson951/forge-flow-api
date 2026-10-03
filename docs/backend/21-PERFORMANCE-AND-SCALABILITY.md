@@ -2,6 +2,8 @@
 
 **Status:** COMPLETE WITH EXCEPTIONS (2026-10-02) — AC-21.3 passes for intake alone but not with workers on the same local disk; AC-21.1 at load scale lacks the duplicate-check query; FR-21.9 and FR-21.12-under-load not measured. Accepted for now (frontend next). See [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
+> **Next phase (2026-10-03):** this part measured the original platform and remains the baseline. The final performance and scalability validation now happens in [Part 27](27-EXPANDED-PLATFORM-PERFORMANCE-AND-SCALABILITY.md), after the schedule trigger, generic HTTP, Jira and Gmail exist — covering scheduled load, HTTP action load, provider rate limits, multiple API/worker/scheduler instances, duplicate-schedule prevention, Jira webhook and Gmail notification bursts, webhook dedup, backpressure, provider concurrency, DB pooling, Redis memory, graceful shutdown, stalled jobs, retention and 1M-run queries.
+
 ## Objective
 
 Review the architecture for realistic growth, measure actual bottlenecks with a simple load test, fix the ones that matter, and record decisions — without premature optimisation.

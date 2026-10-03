@@ -30,6 +30,11 @@ Legend: **NOT STARTED** (no meaningful implementation; stubs don't count) · **I
 | 20 | [CI/CD and Containerization](20-CI-CD-AND-CONTAINERIZATION.md) | COMPLETE | Verified 2026-10-02 with Docker: one-shot migrate → healthy API + worker from one non-root image (491 MB, prod deps only), workflow run through the containers, graceful stop in 1.2 s, gitleaks clean; CI adds image build, Trivy (non-blocking), secret scan, per-run secrets. Green CI run (AC-20.4) to be recorded from the PR. **Part 22:** `main` CI was red after the merge (Trivy action unresolvable) — fixed in Part 22 |
 | 21 | [Performance and Scalability](21-PERFORMANCE-AND-SCALABILITY.md) | COMPLETE WITH EXCEPTIONS | 1M-run EXPLAIN: hot queries are index scans; fixed a missing `retryOfRunId` index (18.7 s → 25 ms) and a non-sargable keyset cursor (295 → 1.9 ms); retention job, provider concurrency limits, backpressure 429, pool sizing. Webhook p95 38 ms alone, 1.76 s with workers on local disk (fsync-bound) — accepted for now |
 | 22 | [Backend Release Readiness](22-BACKEND-RELEASE-READINESS.md) | COMPLETE WITH DEFERRALS | Audit of 21 areas (no FAIL), release checklist, OWASP walkthrough, IDOR probe 0/26, migration upgrade from the previous release, setup run from a clean clone (4 defects found and fixed), Swagger completed and enforced, CI Trivy breakage fixed; 902 tests green. Deferred: CI link (after push), live Microsoft task, live AI run |
+| 23 | [Schedule / Time Trigger](23-SCHEDULE-TRIGGER.md) | IN PROGRESS | Implemented: schedule.trigger (7 kinds, IANA timezone), WorkflowSchedule, evaluator on the maintenance queue with SKIP LOCKED and a unique occurrence key; 30 unit and 15 integration tests green, including racing evaluators and a worker end-to-end run. Pending: CI run, live run on the dev stack |
+| 24 | [Generic HTTP: Outbound Requests and Inbound Triggers](24-HTTP-REQUEST-AND-CUSTOM-API.md) | NOT STARTED | `http.request` with SSRF egress guard and credential connections; robust generic webhook trigger (verification modes, replay protection, dedup, filters, limits, delivery log, test capture); `http.poll` trigger |
+| 25 | [Jira Cloud Integration](25-JIRA-INTEGRATION.md) | NOT STARTED | OAuth 2.0 (3LO), issue created/updated/transitioned triggers via dynamic webhooks with renewal, seven actions |
+| 26 | [Gmail Integration](26-GMAIL-INTEGRATION.md) | NOT STARTED | Google OAuth, Pub/Sub push + history resolution, watch renewal, seven actions, email data minimisation |
+| 27 | [Expanded-Platform Performance and Scalability](27-EXPANDED-PLATFORM-PERFORMANCE-AND-SCALABILITY.md) | NOT STARTED | Final validation of the expanded platform (schedules, HTTP, Jira, Gmail, multi-instance duplicate prevention); Part 21 remains the baseline |
 
 Baseline at review time (commit `88b2fb5`): `npm run build` ✔, `npm run lint` ✔ (0 problems), `npm run typecheck` ✔, `npm test` ✔ (2 suites, 3 tests), `npm run test:e2e` ✔ (1 test), `prisma validate` ✔, `prisma migrate status` up to date. Redis container not running at review time.
 
@@ -141,6 +146,45 @@ Guarantee: **at-least-once processing with deduplication at each boundary**; no 
 
 Standing suites that every new route must join: **tenant-isolation suite** (Part 04) and **secret canary scans** (Part 17). Details in [Part 19](19-TESTING-AND-QUALITY-GATE.md).
 
+## Next Phase: Platform Conventions for Parts 23–27
+
+All new triggers and integrations converge on the existing concepts — no per-provider mini-frameworks:
+
+```
+Integration provider (capability: /integrations/providers, /node-types)
+        ↓
+Workspace connection (what THIS workspace connected; many per provider)
+        ↓
+Encrypted credentials (Part 17 envelope; tokens or structured secrets)
+        ↓
+Triggers (WorkflowTrigger / WorkflowSchedule / WorkflowWebhook / provider subscriptions)
+        ↓
+Durable WorkflowRun (QUEUED) → BullMQ → worker → existing execution engine
+```
+
+- **Capability vs connection:** `/node-types` answers "what can FlowForge execute"; workspace integration endpoints answer "what has this workspace connected". Never conflated.
+- **Multi-tenancy:** every connection belongs to one workspace; credential lookups always include `workspaceId`; a node's `connectionId` from another workspace fails at publish and at execution (tenant-isolation suite).
+- **Connection status:** `CONNECTED` / `NEEDS_ATTENTION` / `DISCONNECTED` plus a safe `statusReason` (`TOKEN_REVOKED`, `TOKEN_EXPIRED`, `APP_UNINSTALLED`, `PERMISSION_CHANGED`, `WATCH_RENEWAL_FAILED`, `AUTHENTICATION_FAILED`) — introduced in Part 24, used by all providers.
+- **Background work:** periodic jobs (schedule evaluation, webhook/watch renewal, polling) run on the existing **maintenance queue** via BullMQ job schedulers in the worker; distributed correctness comes from PostgreSQL (unique keys, `SKIP LOCKED`, conditional updates), never from in-memory locks.
+- **Duplicate prevention:** one run per schedule occurrence / poll item / mailbox message / webhook delivery, enforced by the unique `WorkflowRun(workspaceId, idempotencyKey)` and `WebhookDelivery(provider, deliveryId)` indexes.
+- **Naming:** node types follow existing conventions (`github.issue.created`, `slack.sendMessage`): triggers `<provider>.<resource>.<event>`, actions `<provider>.<verbObject>`.
+
+Product scenarios used as E2E acceptance across Parts 23–27:
+
+| # | Scenario | Parts |
+| --- | --- | --- |
+| 1 | Daily operations: schedule weekday 07:00 → HTTP fetch → condition failures > 0 → Gmail report | 23, 24, 26 |
+| 2 | Email triage: Gmail new support email → AI classify/extract → priority HIGH → Jira incident → Slack | 26, 25, 12, 13 |
+| 3 | Engineering: GitHub issue/PR → condition/AI → Jira create/update → Slack | 10, 25, 13 |
+| 4 | Universal API: generic webhook → HTTP request → condition → Jira/Gmail/Slack | 24 (+25/26) |
+| 5 | Periodic reporting: schedule Friday 16:00 → Jira search → AI summarise → Gmail | 23, 25, 12, 26 |
+
+## Developer Experience and Deployment
+
+- API and worker stay **separate processes** (`src/main.ts`, `src/worker.ts`), independently deployable and horizontally scalable. The API never boots the worker.
+- Recommended convenience for local development (to add in Part 23): `npm run dev` starting `start:dev` (API) and `worker:dev` (worker) side by side with a process runner (e.g. `concurrently`), clearly labelled output, both stopping together. Production remains `start:prod` and `worker:prod` as separate services.
+- Target initial production shape (no Kubernetes required): HTTPS reverse proxy → FlowForge Web → FlowForge API (n instances) → PostgreSQL + Redis/BullMQ → FlowForge workers (n) → GitHub / Slack / Microsoft / Jira / Gmail / HTTP / AI. Public URLs needed for provider webhooks and Pub/Sub push.
+
 ## Definition of Done
 
 A part is **COMPLETE** only when all of the following are true and recorded as evidence in that part's file:
@@ -168,8 +212,9 @@ Code existing is not evidence. A failed acceptance criterion keeps the part IN P
 6. **Actions:** 12 → 13 → 14
 7. **Reliability & operations:** 15 → 16 → 17 (completion/audit) → 18
 8. **Quality & delivery:** 19 → 20 → 21 → 22
+9. **Next phase — triggers & integrations (planned 2026-10-03):** 23 Schedule → 24 Generic HTTP (needs the scheduler for `http.poll`) → 25 Jira (introduces the shared provider-subscription/renewal pattern and the generalised OAuth token manager) → 26 Gmail (reuses both) → 27 Expanded-platform performance validation (runs last, against the full platform)
 
-Parts 19 and 20 are advanced incrementally throughout (every part adds tests; CI grows with it); they are marked COMPLETE only at their turn.
+Parts 19 and 20 are advanced incrementally throughout (every part adds tests; CI grows with it); they are marked COMPLETE only at their turn. Per-workspace AI keys (BYOK) were discussed and are **parked** (product decision 2026-10-03); scenarios use the current AI steps.
 
 ## Dependency Map
 
@@ -202,6 +247,16 @@ flowchart TD
   P19 --> P20[20 CI/CD]
   P20 --> P21[21 Performance]
   P21 --> P22[22 Release readiness]
+  P22 --> P23[23 Schedule trigger]
+  P23 --> P24[24 Generic HTTP in/out]
+  P18 --> P24
+  P24 --> P25[25 Jira]
+  P14 --> P25
+  P25 --> P26[26 Gmail]
+  P23 --> P27[27 Expanded performance]
+  P24 --> P27
+  P25 --> P27
+  P26 --> P27
 ```
 
 | Part | Hard dependencies |
@@ -228,6 +283,11 @@ flowchart TD
 | 20 | 01, 19 |
 | 21 | 07–16, 20 |
 | 22 | all |
+| 23 | 06, 07, 08, 15, 16 |
+| 24 | 09, 11, 15, 17, 18, 23 (`http.poll`) |
+| 25 | 09, 10 (pattern), 14 (token manager to generalise), 15, 17, 18, 24 (`statusReason`) |
+| 26 | 09, 15, 17, 18, 21 (retention), 24, 25 (subscriptions, renewal, token manager) |
+| 27 | 21 (baseline/tooling), 23, 24, 25, 26 |
 
 ## Change Log
 
@@ -256,3 +316,4 @@ flowchart TD
 | 2026-10-02 | Part 20 implemented and verified locally with Docker → COMPLETE (CI link pending). Next: Part 21 (performance and scalability). |
 | 2026-10-02 | Part 21 implemented and measured → COMPLETE WITH EXCEPTIONS (see spec). Next: Part 22 (release readiness) or frontend. |
 | 2026-10-02 | Part 22 release audit → COMPLETE WITH DEFERRALS. Backend is a release candidate with documented limitations; next: frontend. |
+| 2026-10-03 | Next phase planned (no implementation): Parts 23 Schedule trigger, 24 Generic HTTP (outbound + robust inbound triggers), 25 Jira, 26 Gmail, 27 Expanded-platform performance validation. Platform conventions, scenarios and developer-experience notes added. Per-workspace AI keys (BYOK) parked. |

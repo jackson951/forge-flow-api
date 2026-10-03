@@ -26,6 +26,17 @@ const SUMMARY_SELECT = {
   createdAt: true,
   updatedAt: true,
   activeVersion: { select: { id: true, version: true, publishedAt: true } },
+  // Part 23: read-only summary of the active version's schedule trigger (null otherwise).
+  schedule: {
+    select: {
+      active: true,
+      timezone: true,
+      description: true,
+      nextRunAt: true,
+      lastOccurrenceAt: true,
+      lastRunId: true,
+    },
+  },
 } satisfies Prisma.WorkflowSelect;
 
 export type WorkflowSummary = Prisma.WorkflowGetPayload<{ select: typeof SUMMARY_SELECT }>;

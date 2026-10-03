@@ -10,6 +10,7 @@ import {
 import { PinoLogger } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import { parseDefinition } from '../../engine/definition/definition.schema';
+import { SCHEDULE_TRIGGER } from '../../engine/schedule/schedule-node-type';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { QueueBackpressure } from '../../infrastructure/queue/queue-backpressure.service';
 import { RunQueue } from '../../infrastructure/queue/run-queue.service';
@@ -85,9 +86,22 @@ export class RunDispatcherService {
     const trigger = parsed.ok
       ? parsed.definition.nodes.find((n) => n.kind === 'TRIGGER')
       : undefined;
-    if (trigger?.type !== 'manual.trigger') {
+    if (trigger?.type !== 'manual.trigger' && trigger?.type !== SCHEDULE_TRIGGER) {
       throw new ConflictException('This workflow is started by its trigger, not manually');
     }
+    // "Run now" of a schedule workflow (Part 23, FR-23.9): the trigger metadata is built here,
+    // and the caller's input is nested under `input`, so it can never pose as a scheduled run.
+    const triggerInput =
+      trigger.type === SCHEDULE_TRIGGER
+        ? {
+            triggerType: 'MANUAL',
+            scheduledFor: null,
+            triggeredAt: new Date().toISOString(),
+            timezone: (trigger.config.schedule as { timezone?: string } | undefined)?.timezone,
+            scheduleId: null,
+            input: request.input,
+          }
+        : request.input;
 
     await this.backpressure.assertAcceptingManualRuns();
     const idempotencyKey = `manual:${request.idempotencyKey ?? randomUUID()}`;
@@ -100,7 +114,7 @@ export class RunDispatcherService {
           workflowVersionId: version.id,
           triggerSource: TriggerSource.MANUAL,
           idempotencyKey,
-          triggerInput: request.input as Prisma.InputJsonObject,
+          triggerInput: triggerInput as Prisma.InputJsonObject,
           correlationId: request.correlationId,
         },
         select: { id: true, status: true, workflowId: true },
