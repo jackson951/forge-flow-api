@@ -18,6 +18,8 @@ const ALLOWED_CREDENTIAL_IMPORTERS = new Set([
   'modules/integrations/http/http-connections.service.ts', // HTTP connection create / rotate / test (Part 24)
   'modules/integrations/oauth/oauth-token-manager.ts', // shared refresh + rotation, workspace-scoped (Part 25)
   'modules/integrations/jira/jira-token-manager.ts', // Jira refresh via the shared manager (Part 25)
+  'modules/integrations/gmail/gmail-token-manager.ts', // Gmail refresh via the shared manager (Part 26)
+  'modules/integrations/providers/gmail.provider.ts', // type only (revoke receives the credential)
 ]);
 
 function tsFiles(dir: string): string[] {

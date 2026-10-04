@@ -6,6 +6,7 @@ import { GITHUB_NODE_TYPES } from '../../modules/integrations/github/github.node
 import { httpNodeTypes } from '../../modules/integrations/http/http.node-types';
 import { WEBHOOK_NODE_TYPES } from '../../modules/hooks/hook.node-types';
 import { JIRA_NODE_TYPES } from '../../modules/integrations/jira/jira.node-types';
+import { gmailNodeTypes } from '../../modules/integrations/gmail/gmail.node-types';
 import { MICROSOFT_NODE_TYPES } from '../../modules/integrations/microsoft/microsoft.node-types';
 import { SLACK_NODE_TYPES } from '../../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES } from './node-type-catalog';
@@ -63,6 +64,7 @@ describe('no user-configurable outbound URLs (SSRF)', () => {
     ...httpNodeTypes(policy, true),
     ...WEBHOOK_NODE_TYPES,
     ...JIRA_NODE_TYPES,
+    ...gmailNodeTypes(true),
   ];
 
   it('inspects every node type', () => {

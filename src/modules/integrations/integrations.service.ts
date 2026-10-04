@@ -25,6 +25,8 @@ import {
 import { MicrosoftTokenManager } from './microsoft/microsoft-token-manager';
 import { JiraAppCredentialsError, JiraClient, JiraSite } from './jira/jira-client';
 import { JiraTokenManager } from './jira/jira-token-manager';
+import { GmailAppCredentialsError, GmailClient } from './gmail/gmail-client';
+import { GmailTokenManager } from './gmail/gmail-token-manager';
 import { SlackChannel, SlackClient } from './slack/slack-client';
 import {
   ConnectionDeniedError,
@@ -74,6 +76,8 @@ export class IntegrationsService {
     private readonly logger: PinoLogger,
     private readonly jira: JiraClient,
     private readonly jiraTokens: JiraTokenManager,
+    private readonly gmail: GmailClient,
+    private readonly gmailTokens: GmailTokenManager,
   ) {
     this.logger.setContext(IntegrationsService.name);
   }
@@ -342,6 +346,26 @@ export class IntegrationsService {
     }
   }
 
+  /** Gmail labels of the mailbox (Part 26, FR-26.11): id, name, type. */
+  async listGmailLabels(workspaceId: string, connectionId: string) {
+    const connection = await this.findConnection(workspaceId, connectionId);
+    if (connection.provider !== IntegrationProviderKey.GMAIL)
+      throw new NotFoundException('Connection not found');
+    if (connection.status !== ConnectionStatus.CONNECTED) {
+      throw new ConflictException('This Gmail connection needs attention; reconnect it');
+    }
+    try {
+      const body = await this.gmailTokens.withToken(workspaceId, connection.id, (token) =>
+        this.gmail.labels(token),
+      );
+      return (body.labels ?? [])
+        .filter((l) => typeof l.id === 'string')
+        .map((l) => ({ id: l.id!, name: l.name ?? l.id!, type: l.type ?? 'user' }));
+    } catch (err) {
+      throw await this.providerFailure(connection.id, 'Gmail', err);
+    }
+  }
+
   // ── Jira pickers (Part 25, FR-25.9): minimal fields for the editor ─────────
 
   /** The grant's Jira sites, read live (and refreshed on the connection). */
@@ -484,7 +508,11 @@ export class IntegrationsService {
    */
   private async providerFailure(connectionId: string, name: string, err: unknown) {
     // FlowForge's own app credentials were rejected: a server problem, not the user's.
-    if (err instanceof MicrosoftAppCredentialsError || err instanceof JiraAppCredentialsError) {
+    if (
+      err instanceof MicrosoftAppCredentialsError ||
+      err instanceof JiraAppCredentialsError ||
+      err instanceof GmailAppCredentialsError
+    ) {
       this.logger.error({ provider: name }, err.message);
       return new ServiceUnavailableException(`${name} integration is misconfigured on this server`);
     }

@@ -80,10 +80,10 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`, `/http`, `/:connectionId/test`, `/:connectionId` PATCH / DELETE, `/:connectionId/credentials` PUT) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
 | `/workspaces/:workspaceId/dashboard` | dashboard |
-| `/webhooks/:provider` (`github`, `jira`, `test` in non-production) | webhooks |
+| `/webhooks/:provider` (`github`, `jira`, `gmail` (Pub/Sub push), `test` in non-production) | webhooks |
 | `/webhooks/hooks/:hookId` (generic inbound webhook, POST/PUT/PATCH/GET as configured) | hooks |
 | `/workspaces/:workspaceId/workflows/:workflowId/webhook` (+ `/rotate-secret`, `/rotate-url`, `/deliveries`, `/deliveries/:deliveryId/replay`, `/listen`) | hooks |
-| `/workspaces/:workspaceId/integrations/:connectionId/github/repositories`, `/slack/channels`, `/microsoft/todo-lists`, `/jira/sites`, `/jira/projects`, `/jira/issue-types`, `/jira/statuses`, `/jira/users` | integrations |
+| `/workspaces/:workspaceId/integrations/:connectionId/github/repositories`, `/slack/channels`, `/microsoft/todo-lists`, `/jira/sites`, `/jira/projects`, `/jira/issue-types`, `/jira/statuses`, `/jira/users`, `/gmail/labels` | integrations |
 | `/health`, `/health/ready` | health |
 
 Every operation is documented in Swagger (`/api/docs`) with a summary and its error responses (shared `ErrorResponse` envelope). See `docs/architecture.md` for the process split and folder map, and `scripts/load/` for load tests.

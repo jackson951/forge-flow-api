@@ -143,6 +143,16 @@ export class IntegrationsController {
     );
   }
 
+  /** Part 26: Gmail labels for the label trigger and label actions. */
+  @Get(':connectionId/gmail/labels')
+  @ApiOperation({ summary: 'Gmail labels of the mailbox (id, name, type)' })
+  gmailLabels(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    return this.integrations.listGmailLabels(ws.workspaceId, connectionId);
+  }
+
   /** Part 25: Jira pickers for the editor (minimal fields). */
   @Get(':connectionId/jira/sites')
   @ApiOperation({ summary: 'Jira sites the connection can use' })

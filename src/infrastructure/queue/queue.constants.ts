@@ -8,6 +8,8 @@ export const QUEUES = {
   MAINTENANCE: 'maintenance',
   /** http.poll occurrences (Part 24): one job per poll, separate so slow APIs never block maintenance. */
   HTTP_POLLS: 'http-polls',
+  /** Provider notifications resolved in the worker (Part 26: Gmail mailbox history). */
+  PROVIDER_EVENTS: 'provider-events',
 } as const;
 
 export const JOBS = {
@@ -19,6 +21,7 @@ export const JOBS = {
   /** Part 25: provider registrations (Jira webhooks) — on demand per workspace, and periodic. */
   SYNC_SUBSCRIPTIONS: 'sync-subscriptions',
   RENEW_SUBSCRIPTIONS: 'renew-subscriptions',
+  GMAIL_SYNC: 'gmail-sync',
 } as const;
 
 export interface ExecuteRunJobData {
@@ -29,4 +32,8 @@ export interface ExecutePollJobData {
   scheduleId: string;
   /** The occurrence (ISO-8601 UTC) this poll stands for. */
   occurrence: string;
+}
+
+export interface GmailSyncJobData {
+  connectionId: string;
 }
