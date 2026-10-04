@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, TriggerSource, WorkflowStatus } from '@prisma/client';
+import { Prisma, ScheduleKind, TriggerSource, WorkflowStatus } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { AppConfigService } from '../config/app-config.service';
 import { dueOccurrence } from '../engine/schedule/schedule';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import { PollQueue } from '../infrastructure/queue/poll-queue.service';
 import { QueueBackpressure } from '../infrastructure/queue/queue-backpressure.service';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
 
@@ -15,6 +16,8 @@ export interface ScheduleTickResult {
   /** Occurrences not run because of the misfire policy (FR-23.7). */
   skipped: number;
   deactivated: number;
+  /** http.poll occurrences handed to the poll queue (Part 24). */
+  polls: number;
 }
 
 /** Trigger input of a scheduled run: built by the system, never from user input (FR-23.9). */
@@ -38,11 +41,13 @@ interface DueRow {
   workflowStatus: WorkflowStatus;
   activeVersionId: string | null;
   workflowWorkspaceId: string;
+  kind: ScheduleKind;
 }
 
 type Outcome =
   | { kind: 'fired' | 'duplicate'; skipped: number; enqueue?: Record<string, unknown> }
   | { kind: 'skipped'; skipped: number }
+  | { kind: 'poll'; skipped: number; occurrence: string; scheduleId: string }
   | { kind: 'deactivated' };
 
 /** One occurrence = one run: the idempotency key is the occurrence's identity. */
@@ -73,12 +78,19 @@ export class ScheduleEvaluator {
     private readonly backpressure: QueueBackpressure,
     private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
+    private readonly polls: PollQueue,
   ) {
     this.logger.setContext(ScheduleEvaluator.name);
   }
 
   async tick(): Promise<ScheduleTickResult> {
-    const result: ScheduleTickResult = { fired: 0, duplicates: 0, skipped: 0, deactivated: 0 };
+    const result: ScheduleTickResult = {
+      fired: 0,
+      duplicates: 0,
+      skipped: 0,
+      deactivated: 0,
+      polls: 0,
+    };
     for (let i = 0; i < this.config.schedule.batchSize; i++) {
       const outcome = await this.evaluateNext();
       if (!outcome) break;
@@ -89,10 +101,11 @@ export class ScheduleEvaluator {
       result.skipped += outcome.skipped;
       if (outcome.kind === 'fired') result.fired++;
       if (outcome.kind === 'duplicate') result.duplicates++;
+      if (outcome.kind === 'poll') result.polls++;
     }
     // Scheduled runs are never refused, but a backlog is reported like for webhooks.
     if (result.fired) await this.backpressure.observe('schedule');
-    if (result.fired || result.duplicates || result.skipped || result.deactivated) {
+    if (result.fired || result.duplicates || result.skipped || result.deactivated || result.polls) {
       this.logger.info({ ...result, workerId: this.workerId }, 'Schedule tick');
     }
     return result;
@@ -102,6 +115,16 @@ export class ScheduleEvaluator {
   async evaluateNext(): Promise<Outcome | null> {
     const outcome = await this.prisma.$transaction((tx) => this.claimAndFire(tx));
     if (outcome?.kind === 'fired' && outcome.enqueue) await this.enqueue(outcome.enqueue);
+    if (outcome?.kind === 'poll') {
+      const { scheduleId, occurrence } = outcome;
+      await this.polls.enqueue({ scheduleId, occurrence }).catch((err: Error) =>
+        // Polling is state-based: the next occurrence catches up on whatever is new.
+        this.logger.warn(
+          { scheduleId, occurrence, error: err.message },
+          'Poll enqueue failed; skipped',
+        ),
+      );
+    }
     return outcome;
   }
 
@@ -109,7 +132,7 @@ export class ScheduleEvaluator {
     const [due] = await tx.$queryRaw<DueRow[]>`
       SELECT s.id, s."workspaceId", s."workflowId", s."workflowVersionId", s.cron, s.timezone,
              s."nextRunAt", now() AS "dbNow", w.status AS "workflowStatus",
-             w."activeVersionId", w."workspaceId" AS "workflowWorkspaceId"
+             w."activeVersionId", w."workspaceId" AS "workflowWorkspaceId", s.kind
       FROM "WorkflowSchedule" s
       JOIN "Workflow" w ON w.id = s."workflowId"
       WHERE s.active AND s."nextRunAt" <= now()
@@ -159,6 +182,21 @@ export class ScheduleEvaluator {
         },
         'Missed schedule occurrences skipped (only the latest within the grace window runs)',
       );
+    }
+
+    // http.poll (Part 24): the occurrence is a poll, run by the poll queue; items become runs.
+    if (due.kind === ScheduleKind.POLL) {
+      await tx.workflowSchedule.update({
+        where: { id: due.id },
+        data: {
+          nextRunAt: occurrence.next,
+          active: occurrence.next !== null,
+          ...(occurrence.fire && { lastOccurrenceAt: occurrence.fire }),
+        },
+      });
+      return occurrence.fire
+        ? { kind: 'poll', skipped, scheduleId: due.id, occurrence: occurrence.fire.toISOString() }
+        : { kind: 'skipped', skipped };
     }
 
     let runId: string | null = null;

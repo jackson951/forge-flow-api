@@ -59,6 +59,13 @@ export class WorkflowsController {
     return this.workflows.get(ws.workspaceId, id);
   }
 
+  /** Part 24: state of the workflow's http.poll trigger (last poll, status, items fired). */
+  @Get(':id/poll')
+  @ApiOperation({ summary: 'HTTP poll trigger state: last poll, status, items fired' })
+  pollState(@CurrentWorkspace() ws: WorkspaceAccess, @Param('id', ParseUUIDPipe) id: string) {
+    return this.workflows.pollState(ws.workspaceId, id);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a workflow with an empty draft' })
   create(@CurrentWorkspace() ws: WorkspaceAccess, @Body() dto: CreateWorkflowDto) {

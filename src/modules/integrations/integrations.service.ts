@@ -73,8 +73,20 @@ export class IntegrationsService {
     this.logger.setContext(IntegrationsService.name);
   }
 
+  /** OAuth providers, plus HTTP (credential form, Part 24). */
   listProviders() {
-    return this.providers.map((p) => ({ key: p.key, configured: p.isConfigured() }));
+    return [
+      ...this.providers.map((p) => ({
+        key: p.key,
+        configured: p.isConfigured(),
+        connectionType: 'OAUTH' as const,
+      })),
+      {
+        key: IntegrationProviderKey.HTTP,
+        configured: this.config.http.enabled && this.encryption.isConfigured(),
+        connectionType: 'CREDENTIALS' as const,
+      },
+    ];
   }
 
   listConnections(workspaceId: string): Promise<ConnectionSummary[]> {

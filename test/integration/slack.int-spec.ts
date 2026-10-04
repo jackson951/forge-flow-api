@@ -223,7 +223,11 @@ describe('Slack integration (integration)', () => {
   describe('connect flow (AC-13.2)', () => {
     it('reports Slack as configured and redirects to Slack with scopes and state', async () => {
       const providers = await request(server).get('/api/v1/integrations/providers').set(asAdmin());
-      expect(providers.body).toContainEqual({ key: 'SLACK', configured: true });
+      expect(providers.body).toContainEqual({
+        key: 'SLACK',
+        configured: true,
+        connectionType: 'OAUTH',
+      });
 
       const res = track(
         await request(server).post(`${integrations()}/SLACK/connect`).set(asAdmin()),

@@ -181,7 +181,7 @@ Seconds-level schedules; one-off "run at" datetimes; calendars/holidays; per-sch
 - Unit: `src/engine/schedule/schedule.spec.ts`, 30 tests covering every kind, validation, the minimum interval, the timezones, DST and the misfire policy. Full unit suite: 607/607.
 - The side-effect table (AC-15.9) and the Part 15 doc now list `schedule.trigger`.
 - Integration: `test/integration/schedules.int-spec.ts`, 15/15 against real Postgres and Redis. It covers lifecycle, racing evaluators (3 evaluators × 6 schedules → 6 runs), retried-tick suppression, misfire, sweeper recovery, tenant scoping, log fields with no canary secrets, and an end-to-end run through the worker's own maintenance job → queue → engine → SUCCEEDED with `trigger.scheduledFor` in the step output.
-- Typecheck and lint are clean. The full integration suite is not recorded here; see the hand-off.
+- Typecheck and lint are clean. Full integration suite: 21/21 suites, 316/316 tests (no regressions in publishing, webhooks, tenant isolation, API docs or reliability).
 
 | AC | Status |
 | --- | --- |

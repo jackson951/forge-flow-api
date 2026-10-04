@@ -24,7 +24,7 @@ Rate limiting (auth, general, webhook), body/payload limits, validation review, 
 | FR-18.4 | Pagination `limit` max 100 everywhere. |
 | FR-18.5 | Workflow limits (Part 05) enforced: 50 nodes, 100 edges, 256 KB definition. |
 | FR-18.6 | Every outbound provider call has a timeout (≤ 30 s). |
-| FR-18.7 | No user-configurable outbound URL exists. If an HTTP-request node is ever added, it must pass the SSRF policy below first. *(Planned: [Part 24](24-HTTP-REQUEST-AND-CUSTOM-API.md) implements this policy; open decision on plain HTTP for self-hosted/dev.)* |
+| FR-18.7 | No user-configurable outbound URL exists. If an HTTP-request node is ever added, it must pass the SSRF policy below first. *(Amended by [Part 24](24-HTTP-REQUEST-AND-CUSTOM-API.md): `http.request` is the single node with a user-chosen URL and it goes through the egress guard in `src/infrastructure/egress/`. HTTPS only; plain HTTP only with `HTTP_ACTION_ALLOW_PLAIN_HTTP=true`.)* |
 
 ## Technical Requirements
 
@@ -119,7 +119,7 @@ Scaffold already has a global in-memory `ThrottlerGuard` and per-route `@Throttl
 | Helmet | API: `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` (no helmet defaults merged), `Cross-Origin-Resource-Policy: same-site`, HSTS, nosniff, no `X-Powered-By`. Swagger UI (`/api/docs`): helmet's standard CSP so it can load its own assets |
 | CORS | Explicit origins (`CORS_ORIGINS`, never `*`), credentials, methods `GET,POST,PUT,PATCH,DELETE`, headers `Authorization, Content-Type, Idempotency-Key, x-request-id`, exposes `x-request-id`, `Retry-After` |
 | Provider timeouts | GitHub 10 s, Slack 10 s, Microsoft 15 s, AI `AI_TIMEOUT_MS` (default 20 s, max 30 s enforced at startup); a test fails if any source file calls `fetch` without `AbortSignal.timeout` |
-| SSRF | No node type accepts a URL/host setting (test over every node type's config schema); provider base URLs are server configuration only. Microsoft paging links are followed only on the Graph host (Part 14). The policy above applies before any configurable HTTP node is added |
+| SSRF | No node type accepts a URL/host setting (test over every node type's config schema); provider base URLs are server configuration only. Microsoft paging links are followed only on the Graph host (Part 14). Since Part 24, `http.request` is the only exception: it sends only through the egress guard, which the architecture test checks |
 | Dependencies | `npm audit --audit-level=high` in CI; Dependabot (npm weekly, grouped Nest/Prisma; GitHub Actions monthly) |
 
 ### Dependency audit exceptions
