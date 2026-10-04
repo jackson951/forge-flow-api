@@ -70,6 +70,25 @@ export class AppConfigService {
     };
   }
 
+  get gmail() {
+    return {
+      clientId: this.get('GOOGLE_CLIENT_ID'),
+      clientSecret: this.get('GOOGLE_CLIENT_SECRET'),
+      authUrl: this.get('GOOGLE_AUTH_URL'),
+      tokenUrl: this.get('GOOGLE_TOKEN_URL'),
+      revokeUrl: this.get('GOOGLE_REVOKE_URL'),
+      userinfoUrl: this.get('GOOGLE_USERINFO_URL'),
+      jwksUrl: this.get('GOOGLE_JWKS_URL'),
+      apiUrl: this.get('GMAIL_API_URL').replace(/\/+$/, ''),
+      topic: this.get('GMAIL_PUBSUB_TOPIC'),
+      pushAudience: this.get('GMAIL_PUSH_AUDIENCE'),
+      pushServiceAccount: this.get('GMAIL_PUSH_SERVICE_ACCOUNT'),
+      renewWithinMs: this.get('GMAIL_WATCH_RENEW_WITHIN_HOURS') * 3_600_000,
+      dailySendCap: this.get('GMAIL_DAILY_SEND_CAP_PER_WORKSPACE'),
+      maxBodyChars: this.get('GMAIL_MAX_BODY_CHARS'),
+    };
+  }
+
   get jira() {
     return {
       clientId: this.get('JIRA_CLIENT_ID'),

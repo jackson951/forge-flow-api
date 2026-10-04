@@ -25,6 +25,7 @@ import { RunQueue } from './run-queue.service';
       { name: QUEUES.WORKFLOW_RUNS },
       { name: QUEUES.MAINTENANCE },
       { name: QUEUES.HTTP_POLLS },
+      { name: QUEUES.PROVIDER_EVENTS },
     ),
   ],
   providers: [RunQueue, PollQueue, QueueBackpressure],
