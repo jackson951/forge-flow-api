@@ -6,6 +6,9 @@ import { MicrosoftTokenManager } from './microsoft/microsoft-token-manager';
 import { JiraClient } from './jira/jira-client';
 import { JiraTokenManager } from './jira/jira-token-manager';
 import { JiraProvider } from './providers/jira.provider';
+import { GmailClient } from './gmail/gmail-client';
+import { GmailTokenManager } from './gmail/gmail-token-manager';
+import { GmailProvider } from './providers/gmail.provider';
 import { SlackClient } from './slack/slack-client';
 import { IntegrationProvidersController, IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
@@ -28,13 +31,16 @@ import { SlackProvider } from './providers/slack.provider';
     MicrosoftTokenManager,
     JiraClient,
     JiraTokenManager,
+    GmailClient,
+    GmailTokenManager,
     GitHubProvider,
     MicrosoftProvider,
     SlackProvider,
     JiraProvider,
+    GmailProvider,
     {
       provide: INTEGRATION_PROVIDERS,
-      inject: [GitHubProvider, MicrosoftProvider, SlackProvider, JiraProvider],
+      inject: [GitHubProvider, MicrosoftProvider, SlackProvider, JiraProvider, GmailProvider],
       useFactory: (...providers: IntegrationProvider[]) => providers,
     },
     IntegrationsService,

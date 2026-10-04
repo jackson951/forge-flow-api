@@ -15,6 +15,7 @@ import {
 import { createHttpHandlers } from '../../modules/integrations/http/http.node-types';
 import { WEBHOOK_HANDLERS } from '../../modules/hooks/hook.node-types';
 import { createJiraHandlers } from '../../modules/integrations/jira/jira.node-types';
+import { createGmailHandlers } from '../../modules/integrations/gmail/gmail.node-types';
 import { BUILT_IN_HANDLERS } from './built-in-handlers';
 import { NodeHandlerRegistry } from './handler-registry';
 import { NodeHandler } from './node-handler';
@@ -48,6 +49,15 @@ const REVIEWED: Record<string, NodeHandler['sideEffect']> = {
   'jira.transitionIssue': 'non-idempotent',
   'jira.assignIssue': 'non-idempotent',
   'jira.searchIssues': 'idempotent',
+  'gmail.email.received': 'none',
+  'gmail.email.labelReceived': 'none',
+  'gmail.sendEmail': 'non-idempotent',
+  'gmail.replyToEmail': 'non-idempotent',
+  'gmail.getEmail': 'idempotent',
+  'gmail.addLabel': 'idempotent',
+  'gmail.removeLabel': 'idempotent',
+  'gmail.markAsRead': 'idempotent',
+  'gmail.markAsUnread': 'idempotent',
 };
 
 const productionHandlers = (): NodeHandler[] => [
@@ -59,6 +69,7 @@ const productionHandlers = (): NodeHandler[] => [
   ...createHttpHandlers({} as never, {} as never, {} as never),
   ...WEBHOOK_HANDLERS,
   ...createJiraHandlers({} as never, {} as never),
+  ...createGmailHandlers({} as never, {} as never, 1_000),
 ];
 
 describe('handler side-effect classification (AC-15.9)', () => {

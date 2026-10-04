@@ -35,6 +35,8 @@ enum IntegrationProviderKey {
   WEBHOOK
   /// Jira Cloud (Part 25): OAuth 2.0 (3LO), dynamic webhooks.
   JIRA
+  /// Gmail (Part 26): Google OAuth, Pub/Sub push notifications, mailbox history.
+  GMAIL
 }
 
 enum ConnectionStatus {

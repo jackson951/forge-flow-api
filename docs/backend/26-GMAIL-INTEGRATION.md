@@ -1,6 +1,6 @@
 # 26 — Gmail Integration
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** IN PROGRESS: implemented and green against a simulated Google; the real-mailbox E2E (AC-26.6) is pending (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -125,3 +125,131 @@ Attachments (download/upload), drafts, Gmail search-based polling as primary tri
 ## Implementation Notes
 
 Structure like the other providers (`src/modules/integrations/gmail/...`); the Pub/Sub adapter is a `WebhookProvider` whose `normalize` returns a "resolve mailbox" internal event handled by a worker job instead of matching triggers directly. Name mapping from the roadmap request: `gmail.email.received` (kept), `gmail.email.label.received → gmail.email.labelReceived`, `gmail.email.send → gmail.sendEmail`, `gmail.email.reply → gmail.replyToEmail`, `gmail.email.get → gmail.getEmail`, `gmail.label.add → gmail.addLabel`, `gmail.label.remove → gmail.removeLabel`, `gmail.email.markRead → gmail.markAsRead`, `gmail.email.markUnread → gmail.markAsUnread` (consistent with `slack.sendMessage`, `microsoft.todo.createTask`).
+
+## Verified against Google documentation (2026-10-05)
+
+- **Push** (developers.google.com/gmail/api/guides/push):
+  - `users.watch` takes `topicName`, `labelIds` and `labelFilterBehavior: INCLUDE`, and returns `historyId` and `expiration` (ms). "You must call the watch method at least once every 7 days … We recommend calling watch once per day."
+  - The notification `message.data` is base64url JSON `{ emailAddress, historyId }`. `users.stop` ends notifications.
+  - Publish rights on the topic go to `gmail-api-push@system.gserviceaccount.com`. At most one notification per second per watched user.
+- **History** (users.history.list): `startHistoryId`, `historyTypes` (messageAdded, labelAdded, …), `maxResults` ≤ 500, `pageToken`. An outdated `startHistoryId` "typically returns an HTTP 404"; history ids stay valid for at least a week, sometimes only hours.
+- **Pub/Sub push authentication** (docs.cloud.google.com/pubsub/docs/authenticate-push-subscriptions): `Authorization: Bearer <JWT>`, RS256, `iss` = `https://accounts.google.com`, `aud` = the configured audience, `email` = the configured service account with `email_verified: true`, tokens up to an hour old. Verified offline against Google's public keys (`GOOGLE_JWKS_URL`, default `https://www.googleapis.com/oauth2/v3/certs`).
+
+## Scope rationale (FR-26.1)
+
+| Scope | Why | Google class |
+| --- | --- | --- |
+| `gmail.modify` | Read history and messages (triggers, get), change labels and read state. The narrowest scope covering reading *and* label changes; it cannot delete mail permanently. | restricted |
+| `gmail.send` | Send and reply. | sensitive |
+| `openid`, `email` | Google user id (`sub`) and the mailbox address of the connection. | non-sensitive |
+
+Full mail access (`https://mail.google.com/`) is not requested. Restricted scopes need Google verification and an annual security assessment for public use. For this deployment the OAuth app stays in **testing mode** (up to 100 test users, no verification), as the Risks section proposes. A send-only product would need only `gmail.send`.
+
+## Data-handling statement (AC-26.5)
+
+- **Push deliveries** store only `{ emailAddress, historyId }` (the Pub/Sub message id is the dedup key).
+- **Trigger output and `gmail.getEmail`** keep only the minimised message: id, thread, labels, from/to/cc/reply-to, subject, snippet, date, plain text body (HTML converted to text) capped at `GMAIL_MAX_BODY_CHARS` (32 KB, `textTruncated` when cut), attachment **names**, and mailbox. Raw MIME and attachment contents are never fetched or stored. That data lives only in run / step data, which retention trims (Part 21).
+- **Logs** carry ids and counts only (connection, message ids, run counts, history gaps), never addresses other than the connection's own, subjects or bodies. A body canary and a subject canary are asserted absent from all logs in the integration suite.
+- **Email is untrusted input.** When fed to AI steps, Part 12's prompt-injection handling applies.
+- **Outgoing mail:**
+  - From is always the connected mailbox;
+  - header values with CR/LF are refused and addresses validated, so a rendered header injection is never sent;
+  - non-ASCII headers are RFC 2047 encoded;
+  - sends are limited by `GMAIL_DAILY_SEND_CAP_PER_WORKSPACE` (default 500/day, Redis; fails closed).
+
+## Implementation Evidence (2026-10-05)
+
+**Delivered**
+- **Connect** (`GmailProvider`, `GmailClient`): authorization code with PKCE (S256), `access_type=offline` and `prompt=consent`; granted scopes checked (Google allows unticking them); verified email required.
+  - One connection per mailbox (`externalAccountId` = `sub`, label = address).
+  - Shared locked refresh (`GmailTokenManager` on Part 25's `OAuthTokenManager`):
+    - `invalid_grant` → `TOKEN_REVOKED`;
+    - 403 missing permissions → `PERMISSION_CHANGED`;
+    - Google keeps the refresh token on refresh, and the stored one is kept.
+  - Disconnect stops the watch (unless another connection watches the same mailbox), revokes the refresh token at Google and deletes the tokens.
+- **Push intake** `POST /webhooks/gmail` (`GmailPushProvider` + `GoogleOidcVerifier`):
+  - offline OIDC verification (RS256, issuer, audience, service account, `email_verified`, expiry; keys cached for 1 h, unknown key id refetched at most once a minute); unauthenticated pushes → 401 with nothing stored;
+  - dedup by Pub/Sub message id; payload `{ emailAddress, historyId }` only;
+  - the delivery is **deferred**: no Gmail call in the request. After commit, one resolution job per connection watching that mailbox goes on the new `provider-events` queue, and jobs of one mailbox within 2 s coalesce.
+  - The shared pipeline gained async `verify`, `deferred` events and an `afterRecord` hook.
+- **History resolution** (`GmailSyncService.resolve`, worker), under a per-connection advisory lock:
+  1. page `history.list` from the stored `historyId` (messageAdded + labelAdded, up to 20 pages);
+  2. match triggers by label (INBOX for "new email", the chosen label for "gets a label");
+  3. fetch only matching messages (up to 200 per resolution);
+  4. apply the trigger filters (self-sent excluded unless `includeSentByMe`; `from` and `subjectContains`, the only filter fields accepted so far);
+  5. insert runs with ON CONFLICT DO NOTHING on `gmail:<connectionId>:<messageId>:<workflowId>`;
+  6. advance `historyId`, never backwards.
+
+  On a history 404 (FR-26.7), the gap is recorded on the subscription (`gapAt`, `lastError`), the resolver restarts from `users.getProfile`'s current id, and there is **no backfill**.
+- **Watch lifecycle** (`GmailSyncService.run`, run by Part 25's periodic and on-demand subscription jobs; `ProviderSubscription` row per connection):
+  - a watch on `GMAIL_PUBSUB_TOPIC` with the union of labels in use; re-watch on a label change;
+  - renewal within `GMAIL_WATCH_RENEW_WITHIN_HOURS` (48 h; the periodic job runs hourly, so in practice daily, as Google recommends), keeping the stored history position;
+  - an expired watch is re-watched and a resolution is queued to catch up;
+  - 3 failures → `WATCH_RENEWAL_FAILED`, which the next success clears;
+  - the last trigger gone → `users.stop`, unless another connection shares the mailbox, then the row is removed.
+- **Triggers** `gmail.email.received` (`includeSentByMe`, `filter`) and `gmail.email.labelReceived` (`labelId`, `includeSentByMe`, `filter`). Both are unavailable on servers without the Pub/Sub settings; actions work without them.
+- **Actions:**
+  - `gmail.sendEmail`: to/cc/bcc/reply-to, subject, text, optional HTML → multipart/alternative.
+  - `gmail.replyToEmail`: keeps `threadId`, sets `In-Reply-To` / `References` and a single "Re:", replies to Reply-To/From; reply-all adds To/Cc minus our own mailbox.
+  - `gmail.getEmail`, `gmail.addLabel`, `gmail.removeLabel`, `gmail.markAsRead`, `gmail.markAsUnread`.
+  - Side effects: send/reply non-idempotent; label/read idempotent; get is a read. AC-15.9 table and Part 15 doc updated. Provider slot group: `gmail`.
+- **Error mapping** (`mapGmailError`): 401 → refresh + retry; 403 `insufficientPermissions` → `PROVIDER_AUTH` / `PERMISSION_CHANGED`; 403 rate / quota and 429 → `PROVIDER_RATE_LIMIT` with `Retry-After`; 404 → permanent (history 404 → gap procedure); 5xx → retry, except a send, where it is `UNCERTAIN_OUTCOME`.
+- **Picker:** `GET /workspaces/:ws/integrations/:connectionId/gmail/labels` (id, name, type).
+- **Settings:** `GOOGLE_CLIENT_ID/SECRET`, `GOOGLE_*_URL`, `GMAIL_API_URL`, `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUSH_AUDIENCE`, `GMAIL_PUSH_SERVICE_ACCOUNT`, `GMAIL_WATCH_RENEW_WITHIN_HOURS`, `GMAIL_DAILY_SEND_CAP_PER_WORKSPACE`, `GMAIL_MAX_BODY_CHARS`. Migration `20261005150000_gmail` adds the `GMAIL` provider key; watches reuse `ProviderSubscription`.
+
+**Decisions**
+- **Shared mailbox:** a notification routes to every connection subscribed to that mailbox. Each resolves history with its own credentials and history position and creates runs only for its own workspace's triggers. `users.stop` is called only when no other connection still watches the mailbox, because Gmail keeps one watch per user and topic.
+- **No backfill after a history gap** (default; bounded catch-up not built).
+- **Acknowledgement:** Gmail runs use `triggerSource = WEBHOOK` (push-driven). The intake answers 202, not 204; Pub/Sub accepts any 2xx.
+- **Not built:** the optional shared trigger-status endpoint.
+
+**Found while testing**
+- **Retries:** label, read-state, watch and stop calls were classified like a send, so a Gmail 5xx became `UNCERTAIN_OUTCOME` instead of being retried. They are idempotent; only `messages.send` is now treated as a write that may have happened.
+
+**Verification**
+- Unit: `src/modules/integrations/gmail/gmail.spec.ts`, 16 tests covering:
+  - address validation and header injection; RFC 2047; text+HTML MIME; reply subject;
+  - text/HTML extraction, caps, attachments by name only;
+  - the error table;
+  - OIDC verifier with a real RS256 key (valid, wrong issuer / audience / service account / unverified / expired, tampered, HS256, unknown key, missing; key caching);
+  - push adapter; trigger filters; config validation, routing and availability.
+  - Full unit suite: 53 suites / 759 tests.
+- Integration: `test/integration/gmail.int-spec.ts`, 20/20 against `FakeGoogle` (OAuth + PKCE, JWKS-signed push tokens, Gmail v1 with paged history and an expiry point):
+  - connect parameters and scope refusal;
+  - watch on publish; verified push → one run with the minimised email (no attachment content, delivery payload minimal);
+  - duplicate pushes and 3 concurrent resolutions after a rewind → no extra run;
+  - history paging; self-sent skipped; label trigger with the union watch;
+  - unauthenticated pushes → 401 with nothing stored; history 404 → gap and restart, then normal;
+  - renewal keeps the history position; expired watch recovered with a catch-up run; 3 failures → `WATCH_RENEWAL_FAILED`, then healed;
+  - shared mailbox across two workspaces (runs per workspace, watch not stopped while shared);
+  - all seven actions (MIME, threading, reply-all without self, labels, read state); header injection never sent; send 5xx → one attempt, `UNCERTAIN_OUTCOME`; label 5xx retried; daily send cap;
+  - labels picker; tenant isolation; revoked grant → `TOKEN_REVOKED`, healed by reconnect; disconnect stops, revokes and deletes;
+  - body / subject / token canaries absent from logs.
+
+- Full integration suite: 26 suites, 412 tests, green on the first run (including Jira, Microsoft, webhooks and the route inventory).
+
+## Google Cloud setup guide (real mailbox)
+
+1. In a Google Cloud project, enable the **Gmail API** and **Pub/Sub API**.
+2. OAuth consent screen: External, **testing** mode; add your mailbox as a test user. Credentials → OAuth client ID (Web application) with redirect URI `https://<public-url>/api/v1/integrations/gmail/callback`.
+3. Pub/Sub:
+   - create topic `gmail-push` and grant **Publisher** to `gmail-api-push@system.gserviceaccount.com`;
+   - create a service account for push auth (e.g. `gmail-push@<project>.iam.gserviceaccount.com`);
+   - create a **push** subscription to `https://<public-url>/api/v1/webhooks/gmail` with authentication enabled (that service account, audience `https://<public-url>/api/v1/webhooks/gmail`).
+4. Set:
+   - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`;
+   - `OAUTH_REDIRECT_BASE_URL=https://<public-url>/api/v1/integrations`;
+   - `GMAIL_PUBSUB_TOPIC=projects/<project>/topics/gmail-push`;
+   - `GMAIL_PUSH_AUDIENCE=https://<public-url>/api/v1/webhooks/gmail`;
+   - `GMAIL_PUSH_SERVICE_ACCOUNT=gmail-push@<project>.iam.gserviceaccount.com`.
+5. Connect Gmail, publish "Gmail new email → Slack", send an email to the mailbox, and observe the run. Then run the send / reply actions (Scenarios 1 and 2 for AC-26.6).
+
+| AC | Status |
+| --- | --- |
+| AC-26.1 | Met (mock-provider integration) |
+| AC-26.2 | Met (integration, incl. duplicates and concurrency) |
+| AC-26.3 | Met (integration; expiry simulated by setting `expiresAt`) |
+| AC-26.4 | Met (integration) |
+| AC-26.5 | Met (canaries + minimised storage) |
+| AC-26.6 | **Pending**: real mailbox E2E (Scenarios 2 and 1) needs a Google Cloud project, Pub/Sub and a public URL |
+

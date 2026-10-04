@@ -38,6 +38,11 @@ export interface NormalizedEvent {
   accountId?: string;
   /** Account lifecycle events (e.g. app uninstalled) update matching connections. */
   connectionStatus?: ConnectionStatus;
+  /**
+   * The delivery is handled after it is stored, by the provider's `afterRecord` (e.g. Gmail:
+   * a worker resolves mailbox history); no triggers are matched in the request.
+   */
+  deferred?: true;
 }
 
 export type VerificationResult = { ok: true } | { ok: false; reason: string };
@@ -52,7 +57,7 @@ export interface WebhookProvider {
   readonly key: IntegrationProviderKey;
   isEnabled(): boolean;
   /** Signature (and timestamp/replay window if the provider has one). Constant-time compare. */
-  verify(request: InboundWebhook): VerificationResult;
+  verify(request: InboundWebhook): VerificationResult | Promise<VerificationResult>;
   /** Provider's unique id of this delivery; used for deduplication. */
   deliveryId(request: InboundWebhook): string | undefined;
   /** Raw provider event name, stored on the delivery for diagnostics. */
@@ -61,6 +66,8 @@ export interface WebhookProvider {
   normalize(request: InboundWebhook): NormalizedEvent | null;
   /** Provider-specific trigger filter (WorkflowTrigger.filter); absent = every trigger matches. */
   matches?(event: NormalizedEvent, filter: unknown, eventType: string): boolean;
+  /** Deferred events: called once the (new, non-duplicate) delivery is committed. */
+  afterRecord?(event: NormalizedEvent): Promise<void>;
 }
 
 export const WEBHOOK_PROVIDERS = Symbol('WEBHOOK_PROVIDERS');
