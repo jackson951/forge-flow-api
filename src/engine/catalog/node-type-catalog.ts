@@ -30,6 +30,11 @@ export interface NodeTypeDefinition {
    */
   schedule?: (config: Record<string, unknown>) => ScheduleSpec;
   /**
+   * Generic inbound webhooks only (Part 24): the validated trigger config, stored on the
+   * workflow's WorkflowWebhook row on publish.
+   */
+  webhook?: (config: Record<string, unknown>) => unknown;
+  /**
    * Nodes that act through an integration: their config's `connectionId` must reference a
    * CONNECTED connection of this provider in the workflow's own workspace (checked on publish).
    */

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
+import { WebhookTriggerConfig } from '../hooks/hook-config';
+import { HookProvisioner } from '../hooks/hook-provisioner.service';
 import { NodeTypeCatalog } from '../../engine/catalog/node-type-catalog';
 import { deriveTriggerRoutes } from '../../engine/catalog/trigger-routes';
 import { parseDefinition, WorkflowDefinition } from '../../engine/definition/definition.schema';
@@ -21,6 +23,7 @@ export class TriggerRoutingService {
   constructor(
     private readonly catalog: NodeTypeCatalog,
     private readonly logger: PinoLogger,
+    private readonly hooks: HookProvisioner,
   ) {
     this.logger.setContext(TriggerRoutingService.name);
   }
@@ -46,6 +49,7 @@ export class TriggerRoutingService {
       });
     }
     await this.activateSchedule(tx, workflow, version.id, parsed.definition);
+    await this.activateWebhook(tx, workflow, version.id, parsed.definition);
   }
 
   /** Archive: no webhook routes, and the schedule stops (kept for its history, inactive). */
@@ -55,6 +59,25 @@ export class TriggerRoutingService {
       where: { workflowId },
       data: { active: false, nextRunAt: null },
     });
+    await this.hooks.deactivate(tx, workflowId);
+  }
+
+  /** Generic webhook trigger (Part 24): keeps the URL across versions; inactive otherwise. */
+  private async activateWebhook(
+    tx: Prisma.TransactionClient,
+    workflow: { id: string; workspaceId: string },
+    versionId: string,
+    definition: WorkflowDefinition,
+  ): Promise<void> {
+    const trigger = definition.nodes.find((n) => n.kind === 'TRIGGER');
+    const type = trigger && this.catalog.get(trigger.type);
+    const parsed =
+      trigger && type?.webhook ? type.configSchema.safeParse(trigger.config) : undefined;
+    if (!parsed?.success) {
+      await this.hooks.deactivate(tx, workflow.id);
+      return;
+    }
+    await this.hooks.activate(tx, workflow, versionId, parsed.data as WebhookTriggerConfig);
   }
 
   /**

@@ -68,6 +68,16 @@ export class AppConfigService {
     };
   }
 
+  get hooks() {
+    return {
+      maxBodyBytes: this.get('WEBHOOK_HOOK_MAX_BODY_BYTES'),
+      perIpPerMinute: this.get('WEBHOOK_HOOK_PER_IP_PER_MINUTE'),
+      dailyCapPerWorkspace: this.get('WEBHOOK_HOOK_DAILY_CAP_PER_WORKSPACE'),
+      rotationGraceHours: this.get('WEBHOOK_HOOK_ROTATION_GRACE_HOURS'),
+      publicApiUrl: this.get('PUBLIC_API_URL'),
+    };
+  }
+
   get schedule() {
     return {
       tickIntervalMs: this.get('SCHEDULE_TICK_INTERVAL_MS'),

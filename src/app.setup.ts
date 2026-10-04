@@ -2,7 +2,7 @@ import { VersioningType } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
-import { json, NextFunction, Request, Response } from 'express';
+import { json, NextFunction, raw, Request, Response } from 'express';
 import helmet from 'helmet';
 import { REQUEST_ID_HEADER } from './common/constants';
 import { withStandardResponses } from './common/http/api-docs';
@@ -38,6 +38,12 @@ export function configureApp(app: NestExpressApplication): void {
   app.disable('x-powered-by');
   // Hop count of trusted reverse proxies, so req.ip (rate limits, audit) is the client's.
   app.set('trust proxy', config.get('TRUST_PROXY'));
+  // Generic hooks (Part 24): any content type, kept as the exact bytes (HMAC is over the raw
+  // body); parsed by the hook intake itself. Registered before the provider webhook parser.
+  app.use(
+    `/${prefix}/v1/webhooks/hooks`,
+    raw({ type: () => true, limit: config.hooks.maxBodyBytes }),
+  );
   // Webhooks first: larger limit, and the exact raw bytes are kept for signature checks.
   app.use(
     `/${prefix}/v1/webhooks`,

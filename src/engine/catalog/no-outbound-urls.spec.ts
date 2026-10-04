@@ -4,6 +4,7 @@ import { ZodTypeAny } from 'zod';
 import { aiNodeTypes } from '../../modules/ai/ai.node-types';
 import { GITHUB_NODE_TYPES } from '../../modules/integrations/github/github.node-types';
 import { httpNodeTypes } from '../../modules/integrations/http/http.node-types';
+import { WEBHOOK_NODE_TYPES } from '../../modules/hooks/hook.node-types';
 import { MICROSOFT_NODE_TYPES } from '../../modules/integrations/microsoft/microsoft.node-types';
 import { SLACK_NODE_TYPES } from '../../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES } from './node-type-catalog';
@@ -59,6 +60,7 @@ describe('no user-configurable outbound URLs (SSRF)', () => {
     ...MICROSOFT_NODE_TYPES,
     ...aiNodeTypes(true),
     ...httpNodeTypes(policy, true),
+    ...WEBHOOK_NODE_TYPES,
   ];
 
   it('inspects every node type', () => {

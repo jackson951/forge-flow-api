@@ -81,6 +81,8 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
 | `/workspaces/:workspaceId/dashboard` | dashboard |
 | `/webhooks/:provider` (`github`, `test` in non-production) | webhooks |
+| `/webhooks/hooks/:hookId` (generic inbound webhook, POST/PUT/PATCH/GET as configured) | hooks |
+| `/workspaces/:workspaceId/workflows/:workflowId/webhook` (+ `/rotate-secret`, `/rotate-url`, `/deliveries`, `/deliveries/:deliveryId/replay`, `/listen`) | hooks |
 | `/workspaces/:workspaceId/integrations/:connectionId/github/repositories`, `/slack/channels`, `/microsoft/todo-lists` | integrations |
 | `/health`, `/health/ready` | health |
 

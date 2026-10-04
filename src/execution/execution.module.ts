@@ -18,6 +18,7 @@ import { MicrosoftTokenManager } from '../modules/integrations/microsoft/microso
 import { createMicrosoftHandlers } from '../modules/integrations/microsoft/microsoft.node-types';
 import { SlackClient } from '../modules/integrations/slack/slack-client';
 import { createHttpHandlers } from '../modules/integrations/http/http.node-types';
+import { WEBHOOK_HANDLERS } from '../modules/hooks/hook.node-types';
 import { EgressClient } from '../infrastructure/egress/egress-client';
 import { createSlackHandlers } from '../modules/integrations/slack/slack.node-types';
 import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
@@ -60,6 +61,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         egress: EgressClient,
       ): NodeHandler[] => [
         ...BUILT_IN_HANDLERS,
+        ...WEBHOOK_HANDLERS,
         ...GITHUB_HANDLERS,
         ...createSlackHandlers(slack, connections),
         ...createMicrosoftHandlers(microsoft, microsoftTokens),

@@ -138,6 +138,15 @@ export const envSchema = z
       .max(57_344)
       .default(49_152),
 
+    /** Generic inbound webhooks (Part 24): body cap, abuse limits, rotation grace. */
+    WEBHOOK_HOOK_MAX_BODY_BYTES: z.coerce.number().int().min(1_024).max(1_048_576).default(262_144),
+    WEBHOOK_HOOK_PER_IP_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(60),
+    WEBHOOK_HOOK_DAILY_CAP_PER_WORKSPACE: z.coerce.number().int().min(1).default(10_000),
+    /** Default grace for a rotated secret or URL (hours). */
+    WEBHOOK_HOOK_ROTATION_GRACE_HOURS: z.coerce.number().int().min(0).max(168).default(24),
+    /** Public base URL of the API for webhook URLs, e.g. https://api.example.com (optional). */
+    PUBLIC_API_URL: z.preprocess(emptyAsUnset, z.string().url().optional()),
+
     /** Schedule trigger (Part 23): a maintenance job turns due occurrences into runs. */
     SCHEDULE_TICK_INTERVAL_MS: z.coerce.number().int().min(1_000).default(30_000),
     /** A missed occurrence older than this is skipped instead of run late (FR-23.7). */
