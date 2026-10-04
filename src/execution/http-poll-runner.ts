@@ -38,6 +38,12 @@ import {
 } from '../modules/integrations/http/http.node-types';
 import { WorkerConnections } from './worker-connections';
 
+/**
+ * A poll writes up to maxItemsPerPoll runs in one transaction; Prisma's 5 s default aborted it on
+ * a contended database (Part 27). Nothing commits on abort, so the next occurrence retries.
+ */
+const POLL_TX = { maxWait: 10_000, timeout: 30_000 };
+
 export type PollOutcome =
   | { kind: 'not-live' | 'backing-off' }
   | { kind: 'seeded'; items: number }
@@ -218,7 +224,7 @@ export class HttpPollRunner {
         },
       });
       return { fired: inserted.length, seeded: seedOnly, runIds: inserted };
-    });
+    }, POLL_TX);
 
     for (const runId of runIds) {
       await this.runs

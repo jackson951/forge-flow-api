@@ -180,6 +180,8 @@ The clone and its containers/volumes were removed afterwards.
 
 ## Known limitations
 
+_Updated 2026-10-04 for the expanded platform (Parts 23–27); the backend is complete — see the [roadmap](00-BACKEND-ROADMAP.md)._
+
 - **Tenant isolation is application-level** (every query scoped by `workspaceId`, verified by tests); there is no PostgreSQL row-level security as a second line of defence.
 - **Microsoft To Do** task creation not verified against a real mailbox; **AI** steps never run against the live Anthropic API.
 - **Webhook latency under combined load** on a laptop disk (Part 21): intake shares the database's commit capacity with workers; measured p95 1.76 s at 50 req/s with workers running locally. Not re-measured on server storage.
@@ -189,6 +191,14 @@ The clone and its containers/volumes were removed afterwards.
 - **Swagger**: 20 success responses lack typed schemas; few examples.
 - **Single region, single database**; no read replicas or sharding (out of scope).
 - The TEST webhook provider and `THROTTLE_ENABLED=false` exist for tests and load tests; both are refused in production.
+
+**Expanded platform (Parts 23–27, measured in [Part 27](27-EXPANDED-PLATFORM-PERFORMANCE-AND-SCALABILITY.md)):**
+
+- **Webhook acknowledgement p95 < 200 ms is not demonstrated locally** for generic and Jira webhooks: the Part 27 run hosts 2 APIs, the worker and the client in one process on a laptop; the Part 21 multi-container k6 measurement remains the reference (38 ms intake-only).
+- **The multi-container load run (2 API + 3 worker containers, k6) was not repeated** for the expanded platform; distributed correctness was proven in-process (several API instances, workers, evaluators and resolvers on one database and Redis).
+- **Infrastructure chaos** (Redis restart, database restart/failover, killed worker processes) was not exercised in Part 27; graceful worker shutdown under load was.
+- **Microsoft To Do** task creation and **live AI** remain unverified (above); Gmail and Jira were verified against real accounts.
+- **A plain `CREATE INDEX` migration** (Part 27) blocks writes to `WorkflowRun` while it builds: on a large existing database, create the index `CONCURRENTLY` first.
 
 ## Technical debt
 
@@ -252,8 +262,8 @@ flowchart LR
 
 | Capability | Details |
 | --- | --- |
-| Triggers | `manual.trigger` (API, optional `Idempotency-Key`), `github.issue.created` (GitHub App webhook, per repository) |
-| Actions | `util.log`, `slack.sendMessage`, `microsoft.todo.createTask`, `ai.summarize`, `ai.classify`, `ai.extract` |
+| Triggers | `manual.trigger` (API, optional `Idempotency-Key`), `github.issue.created` (GitHub App webhook, per repository); **expanded platform:** `schedule.trigger` (cron / interval / daily-weekly in an IANA timezone, misfire grace), `webhook.received` (generic signed/token webhook per workflow, rotation with grace), `http.poll` (scheduled poll with a bounded seen-item window), `jira.issue.created` / `updated` / `transitioned`, `gmail.email.received` / `gmail.email.labelReceived` (Pub/Sub push + history resolution) |
+| Actions | `util.log`, `slack.sendMessage`, `microsoft.todo.createTask`, `ai.summarize`, `ai.classify`, `ai.extract`; **expanded platform:** `http.request` (egress-guarded, saved HTTP connections), `jira.createIssue` / `updateIssue` / `getIssue` / `searchIssues` / `addComment` / `assignIssue` / `transitionIssue`, `gmail.sendEmail` / `replyToEmail` / `getEmail` / `addLabel` / `removeLabel` / `markAsRead` / `markAsUnread` |
 | Conditions | Nested AND / OR / NOT over 13 operators on trigger data and earlier step outputs; true/false branches |
 | Data mapping | `{{trigger.…}}` / `{{steps.<key>.output.…}}` templates; no code execution |
 | Lifecycle | Draft with optimistic concurrency → validate → publish immutable versions → archive/unarchive; runs always use the version they started on |
@@ -268,6 +278,9 @@ flowchart LR
 | Slack | OAuth v2 (bot token, encrypted) | `slack.sendMessage`; channel listing | Yes |
 | Microsoft | Entra OAuth with PKCE, refresh-token rotation | `microsoft.todo.createTask`; To Do list listing | Connect + refresh yes; task creation no |
 | Anthropic | API key (server-side) | `ai.*` steps with schema-validated output | No (fake provider + mocked contract) |
+| Jira Cloud | Atlassian OAuth 2.0 (3LO), rotating refresh tokens | issue triggers (dynamic webhooks, renewed); 7 issue actions; project/issue-type/status/user pickers | Yes (Part 25, 2026-10-04) |
+| Gmail | Google OAuth with PKCE (restricted scopes) | email triggers (mailbox watch, renewed); 7 email actions | Yes (Part 26, 2026-10-04: push → runs, all 7 actions, Scenario 1) |
+| Generic HTTP | Saved connections (none / bearer / basic / API key header / API key query / custom headers), sealed secrets | `http.request`, `http.poll`, `webhook.received` | Local test services only |
 
 ## Setup
 
