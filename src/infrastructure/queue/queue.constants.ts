@@ -16,6 +16,9 @@ export const JOBS = {
   APPLY_RETENTION: 'apply-retention',
   EVALUATE_SCHEDULES: 'evaluate-schedules',
   EXECUTE_POLL: 'execute-poll',
+  /** Part 25: provider registrations (Jira webhooks) — on demand per workspace, and periodic. */
+  SYNC_SUBSCRIPTIONS: 'sync-subscriptions',
+  RENEW_SUBSCRIPTIONS: 'renew-subscriptions',
 } as const;
 
 export interface ExecuteRunJobData {

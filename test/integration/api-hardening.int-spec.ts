@@ -94,6 +94,11 @@ const EXPECTED_ACCESS: Record<string, 'public' | 'user' | 'member' | 'admin' | '
   'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/github/repositories': 'member',
   'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/slack/channels': 'member',
   'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/microsoft/todo-lists': 'member',
+  'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/jira/sites': 'member',
+  'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/jira/projects': 'member',
+  'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/jira/issue-types': 'member',
+  'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/jira/statuses': 'member',
+  'GET /api/v1/workspaces/:workspaceId/integrations/:connectionId/jira/users': 'member',
   'DELETE /api/v1/workspaces/:workspaceId/integrations/:connectionId': 'admin',
   // Part 24: HTTP connections (credential form).
   'POST /api/v1/workspaces/:workspaceId/integrations/http': 'admin',

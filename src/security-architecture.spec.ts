@@ -16,6 +16,8 @@ const ALLOWED_CREDENTIAL_IMPORTERS = new Set([
   'execution/worker-connections.ts', // decrypts for node handlers, scoped to the run's workspace
   'modules/integrations/microsoft/microsoft-token-manager.ts', // refresh + rotation, workspace-scoped
   'modules/integrations/http/http-connections.service.ts', // HTTP connection create / rotate / test (Part 24)
+  'modules/integrations/oauth/oauth-token-manager.ts', // shared refresh + rotation, workspace-scoped (Part 25)
+  'modules/integrations/jira/jira-token-manager.ts', // Jira refresh via the shared manager (Part 25)
 ]);
 
 function tsFiles(dir: string): string[] {

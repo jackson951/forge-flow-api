@@ -132,6 +132,7 @@ describe('Integration credential security (integration)', () => {
       id: conn.id,
       provider: 'SLACK',
       status: 'CONNECTED',
+      statusReason: null,
       externalAccountId: conn.externalAccountId,
       accountLabel: 'Acme Slack',
       scopes: ['chat:write'],

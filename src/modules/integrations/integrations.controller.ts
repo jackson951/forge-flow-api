@@ -33,6 +33,7 @@ import {
   UpdateHttpConnectionDto,
 } from './dto/http-connection.dto';
 import { SlackChannelsQueryDto } from './dto/slack-channels-query.dto';
+import { JiraPickerQueryDto, JiraProjectPickerQueryDto } from './dto/jira-picker-query.dto';
 import { HttpConnectionsService } from './http/http-connections.service';
 import { byUserOrIp, MINUTE } from '../../common/throttling/rate-limits';
 import { IntegrationsService } from './integrations.service';
@@ -139,6 +140,77 @@ export class IntegrationsController {
       connectionId,
       query.cursor,
       query.limit,
+    );
+  }
+
+  /** Part 25: Jira pickers for the editor (minimal fields). */
+  @Get(':connectionId/jira/sites')
+  @ApiOperation({ summary: 'Jira sites the connection can use' })
+  jiraSites(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    return this.integrations.listJiraSites(ws.workspaceId, connectionId);
+  }
+
+  @Get(':connectionId/jira/projects')
+  @ApiOperation({ summary: 'Jira projects on a site (id, key, name)' })
+  jiraProjects(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Query() query: JiraPickerQueryDto,
+  ) {
+    return this.integrations.listJiraProjects(
+      ws.workspaceId,
+      connectionId,
+      query.siteId,
+      query.query,
+    );
+  }
+
+  @Get(':connectionId/jira/issue-types')
+  @ApiOperation({ summary: 'Issue types of a Jira project' })
+  jiraIssueTypes(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Query() query: JiraProjectPickerQueryDto,
+  ) {
+    return this.integrations.listJiraIssueTypes(
+      ws.workspaceId,
+      connectionId,
+      query.siteId,
+      query.project,
+    );
+  }
+
+  @Get(':connectionId/jira/statuses')
+  @ApiOperation({ summary: 'Statuses used in a Jira project' })
+  jiraStatuses(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Query() query: JiraProjectPickerQueryDto,
+  ) {
+    return this.integrations.listJiraStatuses(
+      ws.workspaceId,
+      connectionId,
+      query.siteId,
+      query.project,
+    );
+  }
+
+  @Get(':connectionId/jira/users')
+  @ApiOperation({ summary: 'Assignable users of a Jira project (account id, display name)' })
+  jiraUsers(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Query() query: JiraProjectPickerQueryDto,
+  ) {
+    return this.integrations.listJiraUsers(
+      ws.workspaceId,
+      connectionId,
+      query.siteId,
+      query.project,
+      query.query,
     );
   }
 

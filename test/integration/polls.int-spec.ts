@@ -164,7 +164,12 @@ describe('HTTP poll trigger (integration)', () => {
     await poll(id); // seed
     items = [item(1), item(2), item(3)];
     expect(await poll(id)).toEqual({ kind: 'polled', fired: 2, newItems: 2 });
-    const runs = await runsOf(id);
+    // Runs of one poll are inserted together (same createdAt): order by item id.
+    const runs = (await runsOf(id)).sort((x, y) =>
+      (x.triggerInput as { itemId: string }).itemId.localeCompare(
+        (y.triggerInput as { itemId: string }).itemId,
+      ),
+    );
     expect(
       runs.map((r) => [r.triggerSource, (r.triggerInput as { itemId: string }).itemId]),
     ).toEqual([

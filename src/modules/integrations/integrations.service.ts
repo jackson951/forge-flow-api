@@ -23,6 +23,8 @@ import {
   TodoList,
 } from './microsoft/microsoft-client';
 import { MicrosoftTokenManager } from './microsoft/microsoft-token-manager';
+import { JiraAppCredentialsError, JiraClient, JiraSite } from './jira/jira-client';
+import { JiraTokenManager } from './jira/jira-token-manager';
 import { SlackChannel, SlackClient } from './slack/slack-client';
 import {
   ConnectionDeniedError,
@@ -37,6 +39,7 @@ export const CONNECTION_SELECT = {
   id: true,
   provider: true,
   status: true,
+  statusReason: true,
   externalAccountId: true,
   accountLabel: true,
   scopes: true,
@@ -69,6 +72,8 @@ export class IntegrationsService {
     private readonly credentials: CredentialStore,
     private readonly encryption: EncryptionService,
     private readonly logger: PinoLogger,
+    private readonly jira: JiraClient,
+    private readonly jiraTokens: JiraTokenManager,
   ) {
     this.logger.setContext(IntegrationsService.name);
   }
@@ -182,14 +187,15 @@ export class IntegrationsService {
             externalAccountId: details.externalAccountId,
             accountLabel: details.accountLabel,
             scopes: details.scopes,
-            metadata: details.metadata,
+            metadata: details.metadata as Prisma.InputJsonObject | undefined,
             createdById: state.userId,
           },
           update: {
             status: ConnectionStatus.CONNECTED,
+            statusReason: null,
             accountLabel: details.accountLabel,
             scopes: details.scopes,
-            metadata: details.metadata,
+            metadata: details.metadata as Prisma.InputJsonObject | undefined,
           },
           select: { id: true },
         });
@@ -247,6 +253,16 @@ export class IntegrationsService {
           },
         );
       }
+    }
+    if (provider?.beforeDisconnect) {
+      await provider
+        .beforeDisconnect({ id: connection.id, workspaceId: access.workspaceId })
+        .catch((err: Error) =>
+          this.logger.warn(
+            { provider: connection.provider, error: err.message },
+            'Provider clean-up before disconnect failed; deleting locally anyway',
+          ),
+        );
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.integrationConnection.delete({ where: { id: connection.id } });
@@ -326,20 +342,156 @@ export class IntegrationsService {
     }
   }
 
+  // ── Jira pickers (Part 25, FR-25.9): minimal fields for the editor ─────────
+
+  /** The grant's Jira sites, read live (and refreshed on the connection). */
+  async listJiraSites(workspaceId: string, connectionId: string): Promise<JiraSite[]> {
+    const connection = await this.jiraConnection(workspaceId, connectionId);
+    try {
+      const sites = await this.jiraTokens.withToken(workspaceId, connection.id, (token) =>
+        this.jira.sites(token),
+      );
+      const current = await this.prisma.integrationConnection.findUniqueOrThrow({
+        where: { id: connection.id },
+        select: { metadata: true },
+      });
+      await this.prisma.integrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          metadata: {
+            ...((current.metadata as Prisma.JsonObject | null) ?? {}),
+            sites,
+          } as unknown as Prisma.InputJsonObject,
+        },
+      });
+      return sites;
+    } catch (err) {
+      throw await this.providerFailure(connection.id, 'Jira', err);
+    }
+  }
+
+  async listJiraProjects(
+    workspaceId: string,
+    connectionId: string,
+    siteId: string,
+    query?: string,
+  ) {
+    const body = await this.jiraCall<{ values?: { id?: string; key?: string; name?: string }[] }>(
+      workspaceId,
+      connectionId,
+      siteId,
+      `/project/search?maxResults=50${query ? `&query=${encodeURIComponent(query)}` : ''}`,
+    );
+    return (body.values ?? []).map((p) => ({
+      id: p.id ?? null,
+      key: p.key ?? null,
+      name: p.name ?? null,
+    }));
+  }
+
+  async listJiraIssueTypes(
+    workspaceId: string,
+    connectionId: string,
+    siteId: string,
+    project: string,
+  ) {
+    const body = await this.jiraCall<{ issueTypes?: JiraNamed[]; values?: JiraNamed[] }>(
+      workspaceId,
+      connectionId,
+      siteId,
+      `/issue/createmeta/${encodeURIComponent(project)}/issuetypes`,
+    );
+    return (body.issueTypes ?? body.values ?? []).map((t) => ({
+      id: t.id ?? null,
+      name: t.name ?? null,
+      subtask: Boolean(t.subtask),
+    }));
+  }
+
+  async listJiraStatuses(
+    workspaceId: string,
+    connectionId: string,
+    siteId: string,
+    project: string,
+  ) {
+    const body = await this.jiraCall<{ statuses?: JiraNamed[] }[]>(
+      workspaceId,
+      connectionId,
+      siteId,
+      `/project/${encodeURIComponent(project)}/statuses`,
+    );
+    const byName = new Map<string, { id: string | null; name: string }>();
+    for (const type of Array.isArray(body) ? body : []) {
+      for (const status of type.statuses ?? []) {
+        if (status.name && !byName.has(status.name))
+          byName.set(status.name, { id: status.id ?? null, name: status.name });
+      }
+    }
+    return [...byName.values()];
+  }
+
+  /** Assignable users: account ids and display names only (no e-mail addresses). */
+  async listJiraUsers(
+    workspaceId: string,
+    connectionId: string,
+    siteId: string,
+    project: string,
+    query?: string,
+  ) {
+    const body = await this.jiraCall<
+      { accountId?: string; displayName?: string; active?: boolean }[]
+    >(
+      workspaceId,
+      connectionId,
+      siteId,
+      `/user/assignable/search?maxResults=20&project=${encodeURIComponent(project)}${query ? `&query=${encodeURIComponent(query)}` : ''}`,
+    );
+    return (Array.isArray(body) ? body : [])
+      .filter((u) => typeof u.accountId === 'string' && u.active !== false)
+      .map((u) => ({ accountId: u.accountId!, displayName: u.displayName ?? null }));
+  }
+
+  private async jiraConnection(workspaceId: string, connectionId: string) {
+    const connection = await this.findConnection(workspaceId, connectionId);
+    if (connection.provider !== IntegrationProviderKey.JIRA)
+      throw new NotFoundException('Connection not found');
+    if (connection.status !== ConnectionStatus.CONNECTED) {
+      throw new ConflictException('This Jira connection needs attention; reconnect it');
+    }
+    return connection;
+  }
+
+  private async jiraCall<T>(
+    workspaceId: string,
+    connectionId: string,
+    siteId: string,
+    path: string,
+  ): Promise<T> {
+    const connection = await this.jiraConnection(workspaceId, connectionId);
+    try {
+      const site = await this.jiraTokens.site(workspaceId, connection.id, siteId);
+      return await this.jiraTokens.withToken(workspaceId, connection.id, (token) =>
+        this.jira.jira<T>(token, site.cloudId, 'GET', path),
+      );
+    } catch (err) {
+      throw await this.providerFailure(connection.id, 'Jira', err);
+    }
+  }
+
   /**
    * Maps a provider failure during an API call: revoked access marks the connection
    * NEEDS_ATTENTION (409); other provider errors are 503 with the safe message.
    */
   private async providerFailure(connectionId: string, name: string, err: unknown) {
     // FlowForge's own app credentials were rejected: a server problem, not the user's.
-    if (err instanceof MicrosoftAppCredentialsError) {
+    if (err instanceof MicrosoftAppCredentialsError || err instanceof JiraAppCredentialsError) {
       this.logger.error({ provider: name }, err.message);
       return new ServiceUnavailableException(`${name} integration is misconfigured on this server`);
     }
     if (err instanceof ExecutionError && err.category === 'PROVIDER_AUTH') {
       await this.prisma.integrationConnection.update({
         where: { id: connectionId },
-        data: { status: ConnectionStatus.NEEDS_ATTENTION },
+        data: { status: ConnectionStatus.NEEDS_ATTENTION, statusReason: 'TOKEN_REVOKED' },
       });
       return new ConflictException(`${name} access was revoked; reconnect the integration`);
     }
@@ -386,4 +538,10 @@ export class IntegrationsService {
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     return url.toString();
   }
+}
+
+interface JiraNamed {
+  id?: string;
+  name?: string;
+  subtask?: boolean;
 }

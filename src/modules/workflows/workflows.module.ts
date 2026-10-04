@@ -1,3 +1,4 @@
+import { ProviderSyncRequester } from './provider-sync.service';
 import { HooksModule } from '../hooks/hooks.module';
 import { Module } from '@nestjs/common';
 import { EngineModule } from '../../engine/engine.module';
@@ -10,7 +11,7 @@ import { WorkflowsService } from './workflows.service';
 @Module({
   imports: [EngineModule, HooksModule],
   controllers: [WorkflowsController, NodeTypesController],
-  providers: [WorkflowsService, PublishingService, TriggerRoutingService],
+  providers: [WorkflowsService, PublishingService, TriggerRoutingService, ProviderSyncRequester],
   exports: [WorkflowsService, PublishingService],
 })
 export class WorkflowsModule {}

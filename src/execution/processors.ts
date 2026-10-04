@@ -12,6 +12,7 @@ import {
 import { runBackoffStrategy } from '../infrastructure/queue/retry-backoff';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
 import { HttpPollRunner } from './http-poll-runner';
+import { JiraSubscriptionsService } from './jira-subscriptions.service';
 import { PrismaRunStore } from './prisma-run-store';
 import { RetentionService } from './retention.service';
 import { ScheduleEvaluator } from './schedule-evaluator';
@@ -90,6 +91,7 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
     private readonly sweeper: RunSweeper,
     private readonly retention: RetentionService,
     private readonly schedules: ScheduleEvaluator,
+    private readonly subscriptions: JiraSubscriptionsService,
     private readonly config: AppConfigService,
     @InjectQueue(QUEUES.MAINTENANCE) private readonly maintenance: Queue,
   ) {
@@ -109,6 +111,12 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
       { every: this.config.schedule.tickIntervalMs },
       { name: JOBS.EVALUATE_SCHEDULES, opts: { removeOnComplete: true, removeOnFail: 100 } },
     );
+    // Part 25: re-sync and renew provider registrations (Jira webhooks expire after 30 days).
+    await this.maintenance.upsertJobScheduler(
+      JOBS.RENEW_SUBSCRIPTIONS,
+      { every: this.config.jira.subscriptionIntervalMs },
+      { name: JOBS.RENEW_SUBSCRIPTIONS, opts: { removeOnComplete: true, removeOnFail: 100 } },
+    );
     const retention = this.config.retention;
     if (retention.enabled) {
       await this.maintenance.upsertJobScheduler(
@@ -124,6 +132,10 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
   async process(job: Job): Promise<void> {
     if (job.name === JOBS.SWEEP_QUEUED_RUNS) await this.sweeper.sweep();
     if (job.name === JOBS.EVALUATE_SCHEDULES) await this.schedules.tick();
+    if (job.name === JOBS.RENEW_SUBSCRIPTIONS) await this.subscriptions.run();
+    if (job.name === JOBS.SYNC_SUBSCRIPTIONS) {
+      await this.subscriptions.run((job.data as { workspaceId?: string }).workspaceId);
+    }
     if (job.name === JOBS.APPLY_RETENTION && this.config.retention.enabled) {
       await this.retention.run();
     }
