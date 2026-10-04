@@ -31,6 +31,8 @@ enum IntegrationProviderKey {
   TEST
   /// Generic HTTP connections (Part 24): API-key / bearer / basic credentials, no OAuth.
   HTTP
+  /// Generic inbound webhooks (Part 24): deliveries to /webhooks/hooks/:hookId.
+  WEBHOOK
 }
 
 enum ConnectionStatus {
@@ -87,6 +89,8 @@ enum WebhookDeliveryStatus {
   PROCESSED
   IGNORED
   FAILED
+  /// Generic webhooks (Part 24): verification failed; no payload is kept.
+  REJECTED
 }
 
 // ── Identity ─────────────────────────────────────────────────────────────────
@@ -145,6 +149,7 @@ model Workspace {
   versions    WorkflowVersion[]
   triggers    WorkflowTrigger[]
   schedules   WorkflowSchedule[]
+  webhooks    WorkflowWebhook[]
   runs        WorkflowRun[]
   connections IntegrationConnection[]
   oauthStates OAuthState[]
@@ -190,6 +195,8 @@ model Workflow {
   versions      WorkflowVersion[] @relation("WorkflowVersions")
   trigger       WorkflowTrigger?
   schedule      WorkflowSchedule?
+  webhook       WorkflowWebhook?
+  deliveries    WebhookDelivery[]
   runs          WorkflowRun[]
 
   @@index([workspaceId, status, updatedAt])
@@ -215,6 +222,7 @@ model WorkflowVersion {
   activeFor   Workflow?          @relation("ActiveVersion")
   triggers    WorkflowTrigger[]
   schedules   WorkflowSchedule[]
+  webhooks    WorkflowWebhook[]
   runs        WorkflowRun[]
 
   @@unique([workflowId, version])
@@ -274,6 +282,45 @@ model WorkflowSchedule {
 
   // The evaluator's "due" scan: active schedules by next occurrence.
   @@index([active, nextRunAt])
+  @@index([workspaceId])
+  @@index([workflowVersionId])
+}
+
+/// Generic inbound webhook of a workflow (Part 24). The URL is /webhooks/hooks/<hookId>; only
+/// a hash of the hook id is indexed (the id itself is kept sealed to show the URL again).
+/// The row survives new versions; `active` follows the active version's trigger.
+model WorkflowWebhook {
+  id                      String    @id @default(uuid()) @db.Uuid
+  workspaceId             String    @db.Uuid
+  workflowId              String    @unique @db.Uuid
+  /// Active version whose trigger config is stored in `config` (null while not published).
+  workflowVersionId       String?   @db.Uuid
+  /// sha256 (hex) of the hook id in the URL.
+  hookIdHash              String    @unique
+  /// The hook id, sealed (AAD bound to this row), so admins can see the URL again.
+  encryptedHookId         String
+  /// URL rotation grace: the previous hook id keeps working until it expires.
+  previousHookIdHash      String?   @unique
+  previousHookIdExpiresAt DateTime? @db.Timestamptz(3)
+  /// The webhook.received node config of the active version (no secrets).
+  config                  Json?
+  active                  Boolean   @default(false)
+  /// Verification secret (token, basic password or HMAC key), sealed.
+  encryptedSecret         String?
+  secretHint              String?
+  /// Set when an admin has seen the generated secret (it is shown once).
+  secretRevealedAt        DateTime? @db.Timestamptz(3)
+  /// Secret rotation grace: the previous secret is accepted until it expires.
+  previousEncryptedSecret String?
+  previousSecretExpiresAt DateTime? @db.Timestamptz(3)
+  rotatedAt               DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime  @updatedAt @db.Timestamptz(3)
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow  Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version   WorkflowVersion? @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
+
   @@index([workspaceId])
   @@index([workflowVersionId])
 }
@@ -423,23 +470,35 @@ model OAuthState {
 /// Verified inbound provider delivery. Unique (provider, deliveryId) is the idempotency guard.
 /// workspaceId is nullable: a delivery is stored before routing and may match no workspace.
 model WebhookDelivery {
-  id           String                 @id @default(uuid()) @db.Uuid
-  provider     IntegrationProviderKey
-  deliveryId   String
-  eventType    String
-  workspaceId  String?                @db.Uuid
-  status       WebhookDeliveryStatus  @default(RECEIVED)
+  id              String                 @id @default(uuid()) @db.Uuid
+  provider        IntegrationProviderKey
+  deliveryId      String
+  eventType       String
+  workspaceId     String?                @db.Uuid
+  /// Generic webhooks (Part 24): the workflow whose hook received it.
+  workflowId      String?                @db.Uuid
+  status          WebhookDeliveryStatus  @default(RECEIVED)
+  /// Why it was ignored or rejected (never secrets or payload).
+  reason          String?
+  /// Later deliveries with the same id (deduplicated, Part 24).
+  duplicateCount  Int                    @default(0)
+  lastDuplicateAt DateTime?              @db.Timestamptz(3)
+  sizeBytes       Int?
+  sourceIp        String?
   /// Normalised, size-limited event (never the raw body or headers).
-  payload      Json?
-  errorMessage String?
-  receivedAt   DateTime               @default(now()) @db.Timestamptz(3)
-  processedAt  DateTime?              @db.Timestamptz(3)
+  payload         Json?
+  errorMessage    String?
+  receivedAt      DateTime               @default(now()) @db.Timestamptz(3)
+  processedAt     DateTime?              @db.Timestamptz(3)
 
   workspace Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  workflow  Workflow?     @relation(fields: [workflowId], references: [id], onDelete: SetNull)
   runs      WorkflowRun[]
 
   @@unique([provider, deliveryId])
   @@index([receivedAt])
+  // Delivery log of one workflow, newest first.
+  @@index([workflowId, receivedAt])
 }
 
 /// Append-only record of security-relevant actions. workspaceId is null for

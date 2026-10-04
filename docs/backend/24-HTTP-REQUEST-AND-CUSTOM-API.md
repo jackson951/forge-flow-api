@@ -1,6 +1,6 @@
 # 24 — Generic HTTP: Outbound Requests and Inbound Triggers (Custom API)
 
-**Status:** IN PROGRESS: slice 1 of 3 (outbound) implemented; slices 2 (`webhook.received`) and 3 (`http.poll`) not started (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** IN PROGRESS: slices 1 (outbound) and 2 (`webhook.received`) implemented; slice 3 (`http.poll`) not started (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -260,7 +260,84 @@ This was written while implementing slice 1, not before coding as the DoD asks. 
 | AC-24.3 | Met (integration) |
 | AC-24.4 | Met for outbound (canaries + log assertions) |
 | AC-24.5 | Met (publish + execution) |
-| AC-24.6, AC-24.8 | Not started (slice 2: `webhook.received`) |
+| AC-24.6, AC-24.8 | See slice 2 below |
 | AC-24.9 | Not started (slice 3: `http.poll`) |
-| AC-24.7 | Not started (needs slice 2) |
+| AC-24.7 | See slice 2 below |
+
+## Implementation Evidence: slice 2 (generic inbound webhook), 2026-10-04
+
+**Delivered**
+- `webhook.received` trigger (`src/modules/hooks/`). Its strict config covers:
+  - `methods` (POST, PUT, PATCH, GET);
+  - `verification`: `none` (only with `acknowledgeUnverified: true`), `token` (header, or `Authorization: Bearer`), `basic`, or `hmac` (sha256/sha1/sha512, hex/base64, prefix, optional timestamp header with replay window in `{timestamp}.{body}` or `v0:{timestamp}:{body}` form);
+  - `ipAllowList` (CIDR);
+  - `deduplication` (header or JSON path);
+  - `filter` (Part 11 condition grammar);
+  - `response` (200/202/204 with an optional static JSON body up to 1 KB);
+  - `challenge` (GET query echo);
+  - `includeHeaders`;
+  - `rateLimitPerMinute`.
+- `WorkflowWebhook` table (migration `20261004150000_generic_webhooks`):
+  - the URL is `/api/v1/webhooks/hooks/<hookId>`, a 128-bit random id; only its sha256 is indexed, and the id itself is kept sealed so admins can see the URL again;
+  - the verification secret is sealed (AAD bound to the row);
+  - previous hook id and previous secret are kept with expiry for rotation grace;
+  - the stored config is a snapshot of the active version's trigger.
+- Provisioning runs in the publish / archive / unarchive transactions (`TriggerRoutingService` → `HookProvisioner`). The URL survives new versions. A version with another trigger, archive, or a draft leaves the row inactive, and the URL answers 404.
+- Intake (`HookIntakeService`), in this order:
+  1. hook lookup (current or in-grace previous id) and live check;
+  2. method check (405);
+  3. challenge echo;
+  4. per-hook and per-IP rate limits in Redis (429 + `Retry-After`; fails open if Redis is down);
+  5. verification with constant-time compares against the current secret and the in-grace previous one (401, generic body, `REJECTED` row with the reason and no payload);
+  6. body parse (JSON, form, text, others as `rawText`; 400 for malformed JSON; 413 above `WEBHOOK_HOOK_MAX_BODY_BYTES`);
+  7. workspace daily cap;
+  8. a transaction that inserts the delivery (unique `(WEBHOOK, <hookRowId>:src|gen:<id>)`), applies the filter (`IGNORED` + reason) and creates the run;
+  9. enqueue after commit, then reply.
+
+  Duplicates create nothing; they increment `duplicateCount` and get the original `runId`.
+- Raw-body parser for `/api/v1/webhooks/hooks` (any content type, exact bytes for HMAC), registered before the provider webhook parser. Exactly POST/PUT/PATCH/GET are routed.
+- Admin API under `/workspaces/:ws/workflows/:id/webhook`:
+  - `GET`: URL, status, mode and secret hint. A generated secret is revealed once, to an admin, claimed atomically.
+  - `POST rotate-secret` (ADMIN): generated or the sender's own secret; grace defaults to 24 h.
+  - `POST rotate-url` (ADMIN): with grace.
+  - `GET deliveries`: keyset paging; status, reason, size, IP, duplicate count, run; never the payload or secrets.
+  - `POST deliveries/:id/replay` (ADMIN): new run, `replayOfDeliveryId`, audited.
+  - `POST` / `GET listen`: 10-minute, one-shot capture for a workflow that is not live.
+- Settings: `WEBHOOK_HOOK_MAX_BODY_BYTES` (256 KB), `WEBHOOK_HOOK_PER_IP_PER_MINUTE` (60), `WEBHOOK_HOOK_DAILY_CAP_PER_WORKSPACE` (10 000), `WEBHOOK_HOOK_ROTATION_GRACE_HOURS` (24), `PUBLIC_API_URL` (base of shown URLs; default: the request's host).
+- Architecture tests updated: side-effect table (`webhook.received`: none), node-type URL check, paginated-list inventory, route authorization inventory.
+
+**Decisions and limits**
+- **Overload:** deliveries are always accepted and stored, and runs are created QUEUED. The database is the buffer, as for provider webhooks (Part 21). The optional "reject with 503" mode is not built.
+- **Test capture** happens before verification, because a draft has no published verification config. It is one-shot, needs a member to start it, expires after 10 minutes, and is bounded by the body cap. MEMBERs may start a capture, since they can edit drafts.
+- **Stripe's combined signature header** (`t=…,v1=…` in one header) is not supported yet. Senders that put the timestamp in its own header are.
+- **Unverified webhooks** are allowed only with an explicit config acknowledgement. There is no separate validation warning.
+- **IP in the trigger output:** `sourceIp` is included (it is `req.ip`, which honours `TRUST_PROXY`).
+- **Provider name:** the generic trigger uses a dedicated table rather than `WorkflowTrigger`, which needs a provider and resource key.
+
+**Verification**
+- Unit: `src/modules/hooks/hook-config.spec.ts`, 17 tests covering config validation, every verification mode (token header/bearer, basic, HMAC sha256/sha1/sha512 in hex/base64 with prefixes, tampered body), timestamp replay window in both formats with forged timestamps, IP allow-list (IPv4, mapped, IPv6), constant-time compare, payload types, header picking and dedup ids. Full unit suite: 50 suites / 701 tests.
+- Integration: `test/integration/hooks.int-spec.ts`, 21/21 on the real API, worker, Postgres and Redis. It covers:
+  - provisioning with the secret shown once and only a hash stored;
+  - 404 for unknown, archived and other-trigger workflows, with the URL surviving versions;
+  - a fast 202 with the run executing asynchronously to SUCCEEDED and the full trigger output;
+  - a generic 401 with a `REJECTED` row and no payload;
+  - bearer, basic, HMAC over raw bytes (different bytes fail), Slack-style timestamped HMAC with an old request refused, IP allow-list, unverified mode;
+  - secret rotation grace (old and new both valid, then grace 0), the sender's own secret, URL rotation grace;
+  - form / text / XML payloads, 400 malformed JSON, 413 oversized;
+  - header dedup with 5 concurrent deliveries giving 1 run (`duplicateCount` 4), and JSON-path dedup;
+  - filter giving `IGNORED`; per-hook 429 with `Retry-After`;
+  - custom 200 and 204 responses, challenge echo, 405, and an unrouted DELETE;
+  - delivery log paging without secrets; replay to SUCCEEDED; rejected deliveries cannot be replayed;
+  - one-shot test capture on a draft;
+  - another workspace gets 404 on every admin route;
+  - **Scenario 4**: webhook → `http.request` → condition → log, SUCCEEDED end to end.
+- Full integration suite: 23 suites, 355 tests, green on the first run.
+- Not covered by an automated test: the workspace daily cap (only the counter logic exists).
+
+| AC | Status |
+| --- | --- |
+| AC-24.6 | Met (integration), except the optional 503 overload mode, which is not built (decision above) |
+| AC-24.8 | Met (integration) |
+| AC-24.7 | Met: Scenario 4 end to end. Slack is replaced by `util.log`, because Slack needs a connected workspace; the spec says Slack "or" Jira/Gmail later |
+| AC-24.9 | Not started (slice 3: `http.poll`) |
 

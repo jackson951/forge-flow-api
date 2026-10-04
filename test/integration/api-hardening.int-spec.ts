@@ -43,6 +43,11 @@ const EXPECTED_ACCESS: Record<string, 'public' | 'user' | 'member' | 'admin' | '
   'GET /api/v1/auth/me': 'user',
   'GET /api/v1/node-types': 'user',
   'POST /api/v1/webhooks/:provider': 'public',
+  // Part 24: generic webhooks, authenticated by the hook's own verification mode.
+  'POST /api/v1/webhooks/hooks/:hookId': 'public',
+  'PUT /api/v1/webhooks/hooks/:hookId': 'public',
+  'PATCH /api/v1/webhooks/hooks/:hookId': 'public',
+  'GET /api/v1/webhooks/hooks/:hookId': 'public',
   'GET /api/v1/integrations/providers': 'user',
   'GET /api/v1/integrations/:provider/callback': 'public',
   'GET /api/v1/workspaces': 'user',
@@ -69,6 +74,14 @@ const EXPECTED_ACCESS: Record<string, 'public' | 'user' | 'member' | 'admin' | '
   'GET /api/v1/workspaces/:workspaceId/workflows/:id/versions': 'member',
   'GET /api/v1/workspaces/:workspaceId/workflows/:id/versions/:version': 'member',
   'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/runs': 'member',
+  'GET /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook': 'member', // secret shown to admins only
+  'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/rotate-secret': 'admin',
+  'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/rotate-url': 'admin',
+  'GET /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/deliveries': 'member',
+  'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/deliveries/:deliveryId/replay':
+    'admin',
+  'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/listen': 'member',
+  'GET /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/listen': 'member',
   'GET /api/v1/workspaces/:workspaceId/runs': 'member',
   'GET /api/v1/workspaces/:workspaceId/runs/:id': 'member',
   'GET /api/v1/workspaces/:workspaceId/runs/:id/steps': 'member',

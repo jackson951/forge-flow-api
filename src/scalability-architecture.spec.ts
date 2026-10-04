@@ -29,6 +29,7 @@ describe('scalability architecture', () => {
   it('every list endpoint pages with a cursor and a bounded take', () => {
     const lists = files.filter((f) => /findMany\(\{[\s\S]*?take: limit \+ 1/.test(f.source));
     expect(lists.map((f) => f.path).sort()).toEqual([
+      'modules/hooks/hook-admin.service.ts', // webhook deliveries (receivedAt, id)
       'modules/runs/runs.service.ts',
       'modules/workflows/publishing.service.ts', // versions
       'modules/workflows/workflows.service.ts',
