@@ -25,12 +25,19 @@ import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
 import { HttpPollRunner } from './http-poll-runner';
 import { JiraSubscriptionsService } from './jira-subscriptions.service';
+import { GmailSyncService } from './gmail-sync.service';
+import { GmailClient } from '../modules/integrations/gmail/gmail-client';
+import { GmailTokenManager } from '../modules/integrations/gmail/gmail-token-manager';
+import { createGmailHandlers } from '../modules/integrations/gmail/gmail.node-types';
+import { REDIS_CLIENT } from '../infrastructure/redis/redis.module';
+import Redis from 'ioredis';
 import { JiraClient } from '../modules/integrations/jira/jira-client';
 import { JiraTokenManager } from '../modules/integrations/jira/jira-token-manager';
 import { createJiraHandlers } from '../modules/integrations/jira/jira.node-types';
 import {
   HttpPollProcessor,
   MaintenanceProcessor,
+  ProviderEventsProcessor,
   RunSweeper,
   WorkflowRunProcessor,
 } from './processors';
@@ -52,6 +59,8 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     MicrosoftTokenManager,
     JiraClient,
     JiraTokenManager,
+    GmailClient,
+    GmailTokenManager,
     {
       provide: NODE_HANDLERS,
       inject: [
@@ -64,6 +73,9 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         EgressClient,
         JiraClient,
         JiraTokenManager,
+        GmailClient,
+        GmailTokenManager,
+        REDIS_CLIENT,
       ],
       useFactory: (
         ai: AiProvider | null,
@@ -75,6 +87,9 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         egress: EgressClient,
         jira: JiraClient,
         jiraTokens: JiraTokenManager,
+        gmail: GmailClient,
+        gmailTokens: GmailTokenManager,
+        redis: Redis,
       ): NodeHandler[] => [
         ...BUILT_IN_HANDLERS,
         ...WEBHOOK_HANDLERS,
@@ -83,6 +98,21 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         ...createMicrosoftHandlers(microsoft, microsoftTokens),
         ...createAiHandlers(ai, config.ai),
         ...createJiraHandlers(jira, jiraTokens),
+        ...createGmailHandlers(
+          gmail,
+          {
+            withToken: (ws, id, call) => gmailTokens.withToken(ws, id, call),
+            mailbox: (ws, id) => gmailTokens.mailbox(ws, id),
+            // Daily send cap per workspace (FR security: abuse limit). Fails closed on Redis errors.
+            reserveSend: async (ws) => {
+              const key = `ff:gmail-sends:${ws}:${new Date().toISOString().slice(0, 10)}`;
+              const count = await redis.incr(key);
+              if (count === 1) await redis.expire(key, 2 * 86_400);
+              return count <= config.gmail.dailySendCap;
+            },
+          },
+          config.gmail.maxBodyChars,
+        ),
         ...createHttpHandlers(egress, connections, {
           policy: config.http.policy,
           maxResponseBytes: config.http.maxResponseBytes,
@@ -137,6 +167,8 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     HttpPollRunner,
     HttpPollProcessor,
     JiraSubscriptionsService,
+    GmailSyncService,
+    ProviderEventsProcessor,
     WorkflowRunProcessor,
     MaintenanceProcessor,
     WorkerHeartbeat,
@@ -150,6 +182,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     ScheduleEvaluator,
     HttpPollRunner,
     JiraSubscriptionsService,
+    GmailSyncService,
   ],
 })
 export class ExecutionModule implements OnModuleInit {

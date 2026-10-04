@@ -209,6 +209,37 @@ export const envSchema = z
     JIRA_CLIENT_SECRET: z.preprocess(emptyAsUnset, z.string().optional()),
     JIRA_AUTH_URL: z.string().url().default('https://auth.atlassian.com'),
     JIRA_API_URL: z.string().url().default('https://api.atlassian.com'),
+    /** Gmail (Part 26): a Google Cloud OAuth client (Web application) with the Gmail API enabled. */
+    GOOGLE_CLIENT_ID: z.preprocess(emptyAsUnset, z.string().optional()),
+    GOOGLE_CLIENT_SECRET: z.preprocess(emptyAsUnset, z.string().optional()),
+    GOOGLE_AUTH_URL: z.string().url().default('https://accounts.google.com/o/oauth2/v2/auth'),
+    GOOGLE_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
+    GOOGLE_REVOKE_URL: z.string().url().default('https://oauth2.googleapis.com/revoke'),
+    GOOGLE_USERINFO_URL: z
+      .string()
+      .url()
+      .default('https://openidconnect.googleapis.com/v1/userinfo'),
+    /** Google's public keys for verifying Pub/Sub push OIDC tokens. */
+    GOOGLE_JWKS_URL: z.string().url().default('https://www.googleapis.com/oauth2/v3/certs'),
+    GMAIL_API_URL: z.string().url().default('https://gmail.googleapis.com/gmail/v1'),
+    /** Pub/Sub topic Gmail publishes to: projects/<project>/topics/<topic>. Unset: no Gmail triggers. */
+    GMAIL_PUBSUB_TOPIC: z.preprocess(
+      emptyAsUnset,
+      z
+        .string()
+        .regex(/^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/topics\/[A-Za-z][A-Za-z0-9._~%+-]{2,254}$/)
+        .optional(),
+    ),
+    /** Audience configured on the push subscription's OIDC token (usually the push endpoint URL). */
+    GMAIL_PUSH_AUDIENCE: z.preprocess(emptyAsUnset, z.string().min(1).optional()),
+    /** Service account the push subscription signs its OIDC token as. */
+    GMAIL_PUSH_SERVICE_ACCOUNT: z.preprocess(emptyAsUnset, z.string().email().optional()),
+    /** Watches expiring within this many hours are renewed (Gmail watches last 7 days). */
+    GMAIL_WATCH_RENEW_WITHIN_HOURS: z.coerce.number().int().min(1).max(160).default(48),
+    /** Emails one workspace may send per day through Gmail actions (abuse limit). */
+    GMAIL_DAILY_SEND_CAP_PER_WORKSPACE: z.coerce.number().int().min(1).max(100_000).default(500),
+    /** Characters of an email's text kept in trigger and step data. */
+    GMAIL_MAX_BODY_CHARS: z.coerce.number().int().min(1_000).max(100_000).default(32_768),
     /** Every renewal tick refreshes Jira webhooks expiring within this many days (they last 30). */
     JIRA_WEBHOOK_RENEW_WITHIN_DAYS: z.coerce.number().int().min(1).max(29).default(7),
     /** How often the worker re-syncs and renews provider subscriptions (Jira webhooks). */
@@ -298,7 +329,10 @@ export const envSchema = z
     }
 
     if (
-      (env.SLACK_CLIENT_ID || env.MICROSOFT_CLIENT_ID || env.JIRA_CLIENT_ID) &&
+      (env.SLACK_CLIENT_ID ||
+        env.MICROSOFT_CLIENT_ID ||
+        env.JIRA_CLIENT_ID ||
+        env.GOOGLE_CLIENT_ID) &&
       !env.ENCRYPTION_KEYS
     ) {
       ctx.addIssue({

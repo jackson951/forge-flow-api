@@ -123,6 +123,9 @@ Handler classification table (fill in as handlers ship):
 | jira.createIssue, jira.updateIssue, jira.addComment, jira.transitionIssue, jira.assignIssue (Part 25) | non-idempotent | none available (Jira REST v3) | UNCERTAIN_OUTCOME |
 | jira.getIssue, jira.searchIssues (Part 25) | idempotent | n/a (reads) | re-executed |
 | jira.issue.created / updated / transitioned (triggers) | none | n/a | re-executed |
+| gmail.sendEmail, gmail.replyToEmail (Part 26) | non-idempotent | none available (Gmail send) | UNCERTAIN_OUTCOME |
+| gmail.addLabel, gmail.removeLabel, gmail.markAsRead, gmail.markAsUnread (Part 26) | idempotent | n/a (setting a label twice is the same) | re-executed |
+| gmail.getEmail; gmail.email.received / labelReceived (triggers) | idempotent / none | n/a | re-executed |
 | http.request (Part 24) | non-idempotent | `Idempotency-Key: <runId>:<nodeKey>` sent when a POST/PATCH is marked `idempotent` | UNCERTAIN_OUTCOME (attempt retries follow the method: GET/HEAD/PUT/DELETE and `idempotent` POST/PATCH retry transient failures) |
 
 Enforced by `src/engine/execution/side-effects.spec.ts` (the table must match the code) and by the worker's startup check (a handler without a valid `sideEffect` stops the worker).

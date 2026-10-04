@@ -25,7 +25,10 @@ export class ProviderSyncRequester {
   async request(workspaceId: string): Promise<void> {
     try {
       const subscribing = await this.prisma.integrationConnection.count({
-        where: { workspaceId, provider: IntegrationProviderKey.JIRA },
+        where: {
+          workspaceId,
+          provider: { in: [IntegrationProviderKey.JIRA, IntegrationProviderKey.GMAIL] },
+        },
       });
       if (!subscribing) return;
       await this.maintenance.add(

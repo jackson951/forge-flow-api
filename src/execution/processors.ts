@@ -6,6 +6,7 @@ import { AppConfigService } from '../config/app-config.service';
 import {
   ExecutePollJobData,
   ExecuteRunJobData,
+  GmailSyncJobData,
   JOBS,
   QUEUES,
 } from '../infrastructure/queue/queue.constants';
@@ -13,6 +14,7 @@ import { runBackoffStrategy } from '../infrastructure/queue/retry-backoff';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
 import { HttpPollRunner } from './http-poll-runner';
 import { JiraSubscriptionsService } from './jira-subscriptions.service';
+import { GmailSyncService } from './gmail-sync.service';
 import { PrismaRunStore } from './prisma-run-store';
 import { RetentionService } from './retention.service';
 import { ScheduleEvaluator } from './schedule-evaluator';
@@ -92,6 +94,7 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
     private readonly retention: RetentionService,
     private readonly schedules: ScheduleEvaluator,
     private readonly subscriptions: JiraSubscriptionsService,
+    private readonly gmail: GmailSyncService,
     private readonly config: AppConfigService,
     @InjectQueue(QUEUES.MAINTENANCE) private readonly maintenance: Queue,
   ) {
@@ -132,9 +135,14 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
   async process(job: Job): Promise<void> {
     if (job.name === JOBS.SWEEP_QUEUED_RUNS) await this.sweeper.sweep();
     if (job.name === JOBS.EVALUATE_SCHEDULES) await this.schedules.tick();
-    if (job.name === JOBS.RENEW_SUBSCRIPTIONS) await this.subscriptions.run();
+    if (job.name === JOBS.RENEW_SUBSCRIPTIONS) {
+      await this.subscriptions.run();
+      await this.gmail.run();
+    }
     if (job.name === JOBS.SYNC_SUBSCRIPTIONS) {
-      await this.subscriptions.run((job.data as { workspaceId?: string }).workspaceId);
+      const { workspaceId } = job.data as { workspaceId?: string };
+      await this.subscriptions.run(workspaceId);
+      await this.gmail.run(workspaceId);
     }
     if (job.name === JOBS.APPLY_RETENTION && this.config.retention.enabled) {
       await this.retention.run();
@@ -162,5 +170,21 @@ export class HttpPollProcessor extends WorkerHost implements OnApplicationBootst
 
   async process(job: Job<ExecutePollJobData>): Promise<void> {
     if (job.name === JOBS.EXECUTE_POLL) await this.runner.run(job.data);
+  }
+}
+
+/**
+ * Provider notifications resolved in the worker (Part 26: Gmail mailbox history). Each job is
+ * one connection; notifications of a mailbox coalesce, and resolutions of one connection are
+ * serialised by GmailSyncService.
+ */
+@Processor(QUEUES.PROVIDER_EVENTS)
+export class ProviderEventsProcessor extends WorkerHost {
+  constructor(private readonly gmail: GmailSyncService) {
+    super();
+  }
+
+  async process(job: Job<GmailSyncJobData>): Promise<void> {
+    if (job.name === JOBS.GMAIL_SYNC) await this.gmail.resolve(job.data.connectionId);
   }
 }

@@ -69,7 +69,7 @@ export class WebhookIntakeService {
     const provider = this.providers.get(slug);
     if (!provider?.isEnabled()) throw new NotFoundException('Unknown webhook provider');
 
-    const verification = provider.verify(request);
+    const verification = await provider.verify(request);
     if (!verification.ok) {
       this.logger.warn({ provider: slug, reason: verification.reason }, 'Webhook rejected');
       throw new UnauthorizedException('Invalid webhook signature');
@@ -104,6 +104,9 @@ export class WebhookIntakeService {
       }
       throw err;
     }
+
+    // Deferred providers (Gmail) continue in the worker, after the delivery is committed.
+    if (event?.deferred && provider.afterRecord) await provider.afterRecord(event);
 
     // Deliveries are always accepted, even under backpressure (the database is the buffer);
     // a backlog only raises the alert.
@@ -150,26 +153,27 @@ export class WebhookIntakeService {
       select: { id: true },
     });
 
-    const triggers = event
-      ? await tx.workflowTrigger.findMany({
-          where: {
-            provider: provider.key,
-            eventType: { in: event.eventTypes ?? [event.eventType] },
-            resourceKey: event.resourceKey,
-            workflow: { status: WorkflowStatus.PUBLISHED },
-          },
-          select: {
-            workspaceId: true,
-            workflowId: true,
-            workflowVersionId: true,
-            eventType: true,
-            connectionId: true,
-            filter: true,
-            workflow: { select: { activeVersionId: true } },
-            connection: { select: { externalAccountId: true, status: true, workspaceId: true } },
-          },
-        })
-      : [];
+    const triggers =
+      event && !event.deferred
+        ? await tx.workflowTrigger.findMany({
+            where: {
+              provider: provider.key,
+              eventType: { in: event.eventTypes ?? [event.eventType] },
+              resourceKey: event.resourceKey,
+              workflow: { status: WorkflowStatus.PUBLISHED },
+            },
+            select: {
+              workspaceId: true,
+              workflowId: true,
+              workflowVersionId: true,
+              eventType: true,
+              connectionId: true,
+              filter: true,
+              workflow: { select: { activeVersionId: true } },
+              connection: { select: { externalAccountId: true, status: true, workspaceId: true } },
+            },
+          })
+        : [];
     const matches = triggers.filter(
       (t) =>
         // Routing rows always follow the active version; this guards against any stale row.
@@ -219,7 +223,7 @@ export class WebhookIntakeService {
       where: { id: delivery.id },
       data: {
         status:
-          runIds.length || connectionsUpdated
+          runIds.length || connectionsUpdated || event?.deferred
             ? WebhookDeliveryStatus.PROCESSED
             : WebhookDeliveryStatus.IGNORED,
         workspaceId: workspaces.size === 1 ? [...workspaces][0] : null,

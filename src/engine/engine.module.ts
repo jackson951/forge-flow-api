@@ -5,6 +5,7 @@ import { GITHUB_NODE_TYPES } from '../modules/integrations/github/github.node-ty
 import { MICROSOFT_NODE_TYPES } from '../modules/integrations/microsoft/microsoft.node-types';
 import { WEBHOOK_NODE_TYPES } from '../modules/hooks/hook.node-types';
 import { JIRA_NODE_TYPES } from '../modules/integrations/jira/jira.node-types';
+import { gmailNodeTypes } from '../modules/integrations/gmail/gmail.node-types';
 import { httpNodeTypes } from '../modules/integrations/http/http.node-types';
 import { SLACK_NODE_TYPES } from '../modules/integrations/slack/slack.node-types';
 import { BUILT_IN_NODE_TYPES, NodeTypeCatalog } from './catalog/node-type-catalog';
@@ -36,6 +37,14 @@ import { scheduleNodeType } from './schedule/schedule-node-type';
           ),
           ...WEBHOOK_NODE_TYPES,
           ...JIRA_NODE_TYPES,
+          ...gmailNodeTypes(
+            Boolean(
+              config.gmail.clientId &&
+              config.gmail.topic &&
+              config.gmail.pushAudience &&
+              config.gmail.pushServiceAccount,
+            ),
+          ),
           ...aiNodeTypes(Boolean(config.ai.provider)),
         ]),
     },
