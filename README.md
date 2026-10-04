@@ -73,7 +73,7 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/auth/*` (register, login, refresh, logout, logout-all, me) | auth |
 | `/workspaces`, `/workspaces/:workspaceId` | workspaces |
 | `/workspaces/:workspaceId/members` (+ `/:userId`) | workspaces |
-| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/versions/:version`, `/duplicate`, `/archive`, `/unarchive`) | workflows |
+| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/versions/:version`, `/duplicate`, `/archive`, `/unarchive`, `/poll`) | workflows |
 | `/node-types` | workflows |
 | `/workspaces/:workspaceId/workflows/:workflowId/runs` (start a manual run, also for schedule workflows; optional `Idempotency-Key`) | runs |
 | `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |

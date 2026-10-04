@@ -106,12 +106,12 @@ describe('HTTP action (Part 24)', () => {
     });
 
     it('the node type uses an optional HTTP connection and can be disabled', () => {
-      expect(httpNodeTypes(policy, true)[0]).toMatchObject({
+      expect(httpNodeTypes(policy, true).find((t) => t.type === 'http.request')).toMatchObject({
         type: 'http.request',
         connectionProvider: 'HTTP',
         connectionOptional: true,
       });
-      expect(httpNodeTypes(policy, false)[0].unavailableReason).toMatch(/disabled/);
+      expect(httpNodeTypes(policy, false).every((t) => t.unavailableReason)).toBe(true);
     });
   });
 

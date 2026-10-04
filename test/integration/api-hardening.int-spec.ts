@@ -75,6 +75,7 @@ const EXPECTED_ACCESS: Record<string, 'public' | 'user' | 'member' | 'admin' | '
   'GET /api/v1/workspaces/:workspaceId/workflows/:id/versions/:version': 'member',
   'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/runs': 'member',
   'GET /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook': 'member', // secret shown to admins only
+  'GET /api/v1/workspaces/:workspaceId/workflows/:id/poll': 'member',
   'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/rotate-secret': 'admin',
   'POST /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/rotate-url': 'admin',
   'GET /api/v1/workspaces/:workspaceId/workflows/:workflowId/webhook/deliveries': 'member',

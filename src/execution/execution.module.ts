@@ -23,7 +23,13 @@ import { EgressClient } from '../infrastructure/egress/egress-client';
 import { createSlackHandlers } from '../modules/integrations/slack/slack.node-types';
 import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
-import { MaintenanceProcessor, RunSweeper, WorkflowRunProcessor } from './processors';
+import { HttpPollRunner } from './http-poll-runner';
+import {
+  HttpPollProcessor,
+  MaintenanceProcessor,
+  RunSweeper,
+  WorkflowRunProcessor,
+} from './processors';
 import { RetentionService } from './retention.service';
 import { ScheduleEvaluator } from './schedule-evaluator';
 import { RunWorkerService } from './run-worker.service';
@@ -117,6 +123,8 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     RunSweeper,
     RetentionService,
     ScheduleEvaluator,
+    HttpPollRunner,
+    HttpPollProcessor,
     WorkflowRunProcessor,
     MaintenanceProcessor,
     WorkerHeartbeat,
@@ -128,6 +136,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     ProviderConcurrencyLimiter,
     RetentionService,
     ScheduleEvaluator,
+    HttpPollRunner,
   ],
 })
 export class ExecutionModule implements OnModuleInit {

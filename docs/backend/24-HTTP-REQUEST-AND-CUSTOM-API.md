@@ -1,6 +1,6 @@
 # 24 — Generic HTTP: Outbound Requests and Inbound Triggers (Custom API)
 
-**Status:** IN PROGRESS: slices 1 (outbound) and 2 (`webhook.received`) implemented; slice 3 (`http.poll`) not started (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** IN PROGRESS: all three slices implemented (outbound, `webhook.received`, `http.poll`). Before COMPLETE: the CI run on the PR and a live check against a real API (see the end of this file) (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -261,7 +261,7 @@ This was written while implementing slice 1, not before coding as the DoD asks. 
 | AC-24.4 | Met for outbound (canaries + log assertions) |
 | AC-24.5 | Met (publish + execution) |
 | AC-24.6, AC-24.8 | See slice 2 below |
-| AC-24.9 | Not started (slice 3: `http.poll`) |
+| AC-24.9 | See slice 3 below |
 | AC-24.7 | See slice 2 below |
 
 ## Implementation Evidence: slice 2 (generic inbound webhook), 2026-10-04
@@ -339,5 +339,73 @@ This was written while implementing slice 1, not before coding as the DoD asks. 
 | AC-24.6 | Met (integration), except the optional 503 overload mode, which is not built (decision above) |
 | AC-24.8 | Met (integration) |
 | AC-24.7 | Met: Scenario 4 end to end. Slack is replaced by `util.log`, because Slack needs a connected workspace; the spec says Slack "or" Jira/Gmail later |
-| AC-24.9 | Not started (slice 3: `http.poll`) |
+| AC-24.9 | See slice 3 below |
+
+## Implementation Evidence: slice 3 (`http.poll`), 2026-10-04
+
+**Delivered**
+- `http.poll` trigger, defined alongside `http.request`:
+  - `connectionId` (optional HTTP connection);
+  - `request`: GET/POST, absolute or relative URL, query, headers, JSON body for POST, timeout. No templates, since there is no upstream data;
+  - `schedule`: the Part 23 kinds, with the server minimum interval applying;
+  - `items.path` (array) or the whole response as one item;
+  - `identity.path` (id field) or a content hash;
+  - `cursor` (`responsePath` → `queryParam`);
+  - `seedOnFirstPoll` (default true) and `maxItemsPerPoll` (1–100, default 50).
+- Scheduling reuses Part 23. `WorkflowSchedule.kind = POLL` (migration `20261004200000_http_poll`), so a poll occurrence gets the same claim (`SKIP LOCKED`, database clock) and misfire policy. It is not turned into a run: it is enqueued on the new `http-polls` queue (job id = occurrence). Polls are a separate queue so slow APIs never delay maintenance; worker concurrency is `HTTP_POLL_CONCURRENCY`.
+- `HttpPollRunner` (worker), in this order:
+  1. live check;
+  2. state (`HttpPollState`), reset when the request/item settings change;
+  3. backoff check;
+  4. request through the egress guard, with connection auth, allowed hosts on every hop, and connection secrets scrubbed from the body;
+  5. JSON only; items, identity and cursor are read from it;
+  6. a transaction that locks the state row, re-checks the active version and inserts runs with ON CONFLICT DO NOTHING on `poll:<workflowId>:<itemId>` (`triggerSource = POLL`, trigger input `{ triggerType: 'POLL', item, itemId, polledAt, scheduleId }`), then updates the seen window (last 2 000 ids), cursor and counters;
+  7. enqueue after commit; the sweeper covers enqueue failures.
+
+  Failures are counted on the state and are never thrown. From the 3rd failure in a row the trigger is `FAILING`, with backoff of 1, 2, 4 … minutes, capped at 60.
+- `GET /workspaces/:ws/workflows/:id/poll`: schedule (active, description, next run) and state (status, seeded, last poll / success / error, failures, next attempt, items fired). Seen ids and the cursor are not exposed, because they can be data from the polled API.
+- Publish enforces `HTTP_POLL_MAX_PER_WORKSPACE` active polls (default 20; 422 `POLL_QUOTA_EXCEEDED`).
+- Architecture tests updated:
+  - `http.poll.request.url` is the second allowed URL setting, and the poll runner must send through `egress.send(`;
+  - side-effect table (`http.poll`: none);
+  - route inventory.
+
+**Decisions and limits**
+- **Exactly once:** "exactly one run per new item" rests on the unique run key, not on the seen window. Concurrent pollers, repeated jobs and a lost window cannot repeat an item that has fired, until retention deletes its run (default 90 days).
+- **Seeded items:** items recorded only by seeding (never fired) rely on the window. If the window is lost they fire once. The integration test pins this.
+- **Lost poll enqueue:** that occurrence is skipped; polling is state-based, so the next occurrence catches up. No sweeper is needed for polls.
+- **Minimum interval:** the spec says a 1-minute minimum; the server's `SCHEDULE_MIN_INTERVAL_MINUTES` (default 5) applies, as for schedules.
+
+**Verification**
+- Unit: `src/modules/integrations/http/http-poll.spec.ts`, 10 tests covering config (URL guard, no templates, minimum interval, body, credential headers), item extraction, id/content identity, new items without repeats, the bounded window, cursor, config fingerprint and backoff. Full unit suite: 51 suites / 711 tests.
+- Integration: `test/integration/polls.int-spec.ts`, 12/12 against a local test API:
+  - publish creates the POLL schedule;
+  - the first poll seeds without runs;
+  - new items give one run each (to SUCCEEDED with the item in the step output), and repeats never fire, including after the seen window is wiped;
+  - 3 concurrent pollers give exactly one run per item;
+  - the cursor is sent from the previous response, and `maxItemsPerPoll` carries the rest to the next poll;
+  - content-hash identity and firing on the first poll;
+  - 3 failures give `FAILING` with backoff, then recovery;
+  - a redirect to metadata is blocked;
+  - non-JSON and missing ids are data errors;
+  - a config change re-seeds;
+  - archived workflows never poll;
+  - the per-workspace quota gives 422;
+  - **end to end**: schedule tick → poll queue → poll → run → SUCCEEDED.
+- Also re-run after the evaluator change: `schedules.int-spec.ts` 15/15.
+- Full integration suite: 24 suites, 368 tests, green.
+
+| AC | Status |
+| --- | --- |
+| AC-24.9 | Met (integration with the local test API, including concurrent pollers and a lost seen window) |
+
+## What remains before Part 24 is COMPLETE
+
+- The CI run on the PR. Only local runs are recorded here.
+- A live check of each direction against a real external API on the dev stack (an outbound call, an inbound webhook from a real sender, a poll).
+- Known open items, recorded above:
+  - the optional 503 overload mode for webhooks (not built);
+  - Stripe's combined signature header;
+  - an automated test of the workspace daily webhook cap;
+  - the threat model was written during slice 1, not before it.
 

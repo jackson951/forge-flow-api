@@ -28,7 +28,11 @@ import { scheduleNodeType } from './schedule/schedule-node-type';
           ...GITHUB_NODE_TYPES,
           ...SLACK_NODE_TYPES,
           ...MICROSOFT_NODE_TYPES,
-          ...httpNodeTypes(config.http.policy, config.http.enabled),
+          ...httpNodeTypes(
+            config.http.policy,
+            config.http.enabled,
+            config.schedule.minIntervalMinutes,
+          ),
           ...WEBHOOK_NODE_TYPES,
           ...aiNodeTypes(Boolean(config.ai.provider)),
         ]),

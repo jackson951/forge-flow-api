@@ -35,6 +35,7 @@ const REVIEWED: Record<string, NodeHandler['sideEffect']> = {
   'ai.classify': 'idempotent',
   'ai.extract': 'idempotent',
   'http.request': 'non-idempotent',
+  'http.poll': 'none',
   'webhook.received': 'none',
 };
 

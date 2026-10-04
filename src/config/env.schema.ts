@@ -123,6 +123,9 @@ export const envSchema = z
       ),
     /** Host names or *.suffix patterns always refused (comma-separated). */
     HTTP_ACTION_DENIED_HOSTS: z.string().default(''),
+    /** Active http.poll triggers per workspace, and polls running at once per worker. */
+    HTTP_POLL_MAX_PER_WORKSPACE: z.coerce.number().int().min(0).max(1_000).default(20),
+    HTTP_POLL_CONCURRENCY: z.coerce.number().int().min(1).max(50).default(2),
     /** Bytes read from a response body (decompressed). */
     HTTP_ACTION_MAX_RESPONSE_BYTES: z.coerce
       .number()
