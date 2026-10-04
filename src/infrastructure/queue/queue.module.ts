@@ -3,6 +3,7 @@ import { Global, Module } from '@nestjs/common';
 import { AppConfigService } from '../../config/app-config.service';
 import { QUEUES } from './queue.constants';
 import { QueueBackpressure } from './queue-backpressure.service';
+import { PollQueue } from './poll-queue.service';
 import { RunQueue } from './run-queue.service';
 
 /**
@@ -20,9 +21,13 @@ import { RunQueue } from './run-queue.service';
         prefix: config.queue.prefix,
       }),
     }),
-    BullModule.registerQueue({ name: QUEUES.WORKFLOW_RUNS }, { name: QUEUES.MAINTENANCE }),
+    BullModule.registerQueue(
+      { name: QUEUES.WORKFLOW_RUNS },
+      { name: QUEUES.MAINTENANCE },
+      { name: QUEUES.HTTP_POLLS },
+    ),
   ],
-  providers: [RunQueue, QueueBackpressure],
-  exports: [BullModule, RunQueue, QueueBackpressure],
+  providers: [RunQueue, PollQueue, QueueBackpressure],
+  exports: [BullModule, RunQueue, PollQueue, QueueBackpressure],
 })
 export class QueueModule {}

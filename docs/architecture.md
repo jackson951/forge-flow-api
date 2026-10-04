@@ -17,6 +17,12 @@ Webhook → API /webhooks/:provider → verify → dedupe (WebhookDelivery uniqu
 Schedule (Part 23): worker maintenance job "evaluate-schedules" (every SCHEDULE_TICK_INTERVAL_MS)
   → due WorkflowSchedule row (FOR UPDATE SKIP LOCKED) → QUEUED run, key schedule:<id>:<occurrence>
   → enqueue after commit → same worker / engine path as above
+
+Generic webhook (Part 24): API /webhooks/hooks/:hookId → verify (token / basic / HMAC, IP list)
+  → dedup (WebhookDelivery unique) → filter → QUEUED run → enqueue → configured fast reply
+
+HTTP poll (Part 24): schedule tick (kind POLL) → http-polls queue → poll runner → egress guard
+  → new items (seen window) → QUEUED run per item, key poll:<workflow>:<item> → enqueue
 ```
 
 The worker's maintenance queue also runs the stale-run sweeper and retention. Every worker

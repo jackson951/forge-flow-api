@@ -19,6 +19,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { RunsModule } from './modules/runs/runs.module';
 import { UsersModule } from './modules/users/users.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { HooksModule } from './modules/hooks/hooks.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 
@@ -52,6 +53,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
     RunsModule,
     IntegrationsModule,
     WebhooksModule,
+    HooksModule,
     DashboardModule,
   ],
   providers: [

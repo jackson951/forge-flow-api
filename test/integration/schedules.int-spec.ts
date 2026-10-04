@@ -12,6 +12,7 @@ import { occurrenceKey, ScheduleEvaluator } from '../../src/execution/schedule-e
 import { PrismaService } from '../../src/infrastructure/prisma/prisma.service';
 import { QueueBackpressure } from '../../src/infrastructure/queue/queue-backpressure.service';
 import { JOBS, QUEUES } from '../../src/infrastructure/queue/queue.constants';
+import { PollQueue } from '../../src/infrastructure/queue/poll-queue.service';
 import { RunQueue } from '../../src/infrastructure/queue/run-queue.service';
 import { bearer, registerUser, RegisteredUser } from '../support/auth';
 import { captureLogs, expectNoSecrets } from '../support/canaries';
@@ -67,6 +68,7 @@ describe('Schedule trigger (integration)', () => {
       api.get(QueueBackpressure),
       api.get(AppConfigService),
       await api.resolve(PinoLogger),
+      api.get(PollQueue),
     );
   }
 

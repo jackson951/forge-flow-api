@@ -6,6 +6,8 @@
 export const QUEUES = {
   WORKFLOW_RUNS: 'workflow-runs',
   MAINTENANCE: 'maintenance',
+  /** http.poll occurrences (Part 24): one job per poll, separate so slow APIs never block maintenance. */
+  HTTP_POLLS: 'http-polls',
 } as const;
 
 export const JOBS = {
@@ -13,8 +15,15 @@ export const JOBS = {
   SWEEP_QUEUED_RUNS: 'sweep-queued-runs',
   APPLY_RETENTION: 'apply-retention',
   EVALUATE_SCHEDULES: 'evaluate-schedules',
+  EXECUTE_POLL: 'execute-poll',
 } as const;
 
 export interface ExecuteRunJobData {
   runId: string;
+}
+
+export interface ExecutePollJobData {
+  scheduleId: string;
+  /** The occurrence (ISO-8601 UTC) this poll stands for. */
+  occurrence: string;
 }

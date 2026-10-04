@@ -49,6 +49,37 @@ export class AppConfigService {
     return databaseUrlWithPool(this.get('DATABASE_URL'), this.get('DATABASE_CONNECTION_LIMIT'));
   }
 
+  get http() {
+    const list = (v: string) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return {
+      enabled: this.get('HTTP_ACTION_ENABLED') ?? true,
+      maxResponseBytes: this.get('HTTP_ACTION_MAX_RESPONSE_BYTES'),
+      maxStoredBodyBytes: this.get('HTTP_ACTION_MAX_STORED_BODY_BYTES'),
+      maxPollsPerWorkspace: this.get('HTTP_POLL_MAX_PER_WORKSPACE'),
+      pollConcurrency: this.get('HTTP_POLL_CONCURRENCY'),
+      policy: {
+        allowPlainHttp: this.get('HTTP_ACTION_ALLOW_PLAIN_HTTP') ?? false,
+        allowPrivateNetworks: this.get('HTTP_ACTION_ALLOW_PRIVATE_NETWORKS') ?? false,
+        deniedPorts: list(this.get('HTTP_ACTION_DENIED_PORTS')).map(Number),
+        deniedHosts: list(this.get('HTTP_ACTION_DENIED_HOSTS')),
+      },
+    };
+  }
+
+  get hooks() {
+    return {
+      maxBodyBytes: this.get('WEBHOOK_HOOK_MAX_BODY_BYTES'),
+      perIpPerMinute: this.get('WEBHOOK_HOOK_PER_IP_PER_MINUTE'),
+      dailyCapPerWorkspace: this.get('WEBHOOK_HOOK_DAILY_CAP_PER_WORKSPACE'),
+      rotationGraceHours: this.get('WEBHOOK_HOOK_ROTATION_GRACE_HOURS'),
+      publicApiUrl: this.get('PUBLIC_API_URL'),
+    };
+  }
+
   get schedule() {
     return {
       tickIntervalMs: this.get('SCHEDULE_TICK_INTERVAL_MS'),

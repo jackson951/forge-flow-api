@@ -15,6 +15,7 @@ const ALLOWED_CREDENTIAL_IMPORTERS = new Set([
   'execution/execution.module.ts', // worker DI only
   'execution/worker-connections.ts', // decrypts for node handlers, scoped to the run's workspace
   'modules/integrations/microsoft/microsoft-token-manager.ts', // refresh + rotation, workspace-scoped
+  'modules/integrations/http/http-connections.service.ts', // HTTP connection create / rotate / test (Part 24)
 ]);
 
 function tsFiles(dir: string): string[] {

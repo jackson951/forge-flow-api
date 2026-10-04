@@ -11,6 +11,9 @@ process.env.LOG_LEVEL ??= 'silent';
 process.env.THROTTLE_ENABLED ??= 'false';
 // Unique BullMQ prefix per test file: never share queues with dev or with other files.
 process.env.QUEUE_PREFIX ??= `ff-test-${process.pid}-${Date.now()}`;
+// Part 24: the local HTTP test service speaks plain HTTP (https-only is unit-tested). It is
+// reachable only through the egress client's test allowance, never by allowing private ranges.
+process.env.HTTP_ACTION_ALLOW_PLAIN_HTTP ??= 'true';
 // Fast retries in tests.
 process.env.QUEUE_BACKOFF_MS ??= '50';
 process.env.QUEUE_JOB_ATTEMPTS ??= '3';

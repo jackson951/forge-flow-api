@@ -29,11 +29,20 @@ export interface NodeTypeDefinition {
    * WorkflowSchedule row on publish.
    */
   schedule?: (config: Record<string, unknown>) => ScheduleSpec;
+  /** POLL: an occurrence polls an HTTP API instead of starting a run (http.poll, Part 24). */
+  scheduleKind?: 'RUN' | 'POLL';
+  /**
+   * Generic inbound webhooks only (Part 24): the validated trigger config, stored on the
+   * workflow's WorkflowWebhook row on publish.
+   */
+  webhook?: (config: Record<string, unknown>) => unknown;
   /**
    * Nodes that act through an integration: their config's `connectionId` must reference a
    * CONNECTED connection of this provider in the workflow's own workspace (checked on publish).
    */
   connectionProvider?: IntegrationProviderKey;
+  /** The connection may be omitted (e.g. http.request without authentication). */
+  connectionOptional?: boolean;
   /**
    * Set when this server cannot run the node type (e.g. no AI provider configured): drafts
    * may contain it, but publishing fails with PROVIDER_NOT_CONFIGURED.

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -7,10 +8,13 @@ import {
   Param,
   ParseEnumPipe,
   ParseUUIDPipe,
+  Patch,
   Post,
+  Put,
   Query,
   Res,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiFoundResponse,
@@ -22,7 +26,15 @@ import { IntegrationProviderKey } from '@prisma/client';
 import { Response } from 'express';
 import { CurrentWorkspace, Public, RequireRole } from '../../common/decorators';
 import { WorkspaceAccess } from '../../common/interfaces/workspace-access.interface';
+import {
+  CreateHttpConnectionDto,
+  RotateHttpCredentialsDto,
+  TestHttpConnectionDto,
+  UpdateHttpConnectionDto,
+} from './dto/http-connection.dto';
 import { SlackChannelsQueryDto } from './dto/slack-channels-query.dto';
+import { HttpConnectionsService } from './http/http-connections.service';
+import { byUserOrIp, MINUTE } from '../../common/throttling/rate-limits';
 import { IntegrationsService } from './integrations.service';
 
 const providerPipe = new ParseEnumPipe(IntegrationProviderKey);
@@ -32,12 +44,62 @@ const providerPipe = new ParseEnumPipe(IntegrationProviderKey);
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/integrations')
 export class IntegrationsController {
-  constructor(private readonly integrations: IntegrationsService) {}
+  constructor(
+    private readonly integrations: IntegrationsService,
+    private readonly http: HttpConnectionsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Connected integration accounts of the workspace (no secrets)' })
   connections(@CurrentWorkspace() ws: WorkspaceAccess) {
     return this.integrations.listConnections(ws.workspaceId);
+  }
+
+  /** Part 24: credential-based HTTP connection (no OAuth). Secrets are write-only. */
+  @RequireRole('ADMIN')
+  @ApiServiceUnavailableResponse({ description: 'HTTP connections or encryption not configured' })
+  @Post('http')
+  @ApiOperation({ summary: 'Create an HTTP connection (API key / bearer / basic) (ADMIN)' })
+  createHttp(@CurrentWorkspace() ws: WorkspaceAccess, @Body() dto: CreateHttpConnectionDto) {
+    return this.http.create(ws, dto);
+  }
+
+  /** One request through the egress guard; returns the outcome only, never the response. */
+  @RequireRole('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: MINUTE, getTracker: byUserOrIp } })
+  @Post(':connectionId/test')
+  @ApiOperation({ summary: 'Test an HTTP connection against a URL (outcome only) (ADMIN)' })
+  testHttp(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: TestHttpConnectionDto,
+  ) {
+    return this.http.test(ws, connectionId, dto);
+  }
+
+  @RequireRole('ADMIN')
+  @Patch(':connectionId')
+  @ApiOperation({
+    summary: 'Rename an HTTP connection or change its base URL / allowed hosts (ADMIN)',
+  })
+  updateHttp(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: UpdateHttpConnectionDto,
+  ) {
+    return this.http.update(ws, connectionId, dto);
+  }
+
+  @RequireRole('ADMIN')
+  @Put(':connectionId/credentials')
+  @ApiOperation({ summary: 'Replace the secrets of an HTTP connection (write-only) (ADMIN)' })
+  rotateHttp(
+    @CurrentWorkspace() ws: WorkspaceAccess,
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: RotateHttpCredentialsDto,
+  ) {
+    return this.http.rotate(ws, connectionId, dto.credentials);
   }
 
   /** Returns the provider URL to send the browser to. */

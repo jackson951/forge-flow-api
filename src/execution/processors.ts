@@ -3,9 +3,15 @@ import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { DelayedError, Job, Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../config/app-config.service';
-import { ExecuteRunJobData, JOBS, QUEUES } from '../infrastructure/queue/queue.constants';
+import {
+  ExecutePollJobData,
+  ExecuteRunJobData,
+  JOBS,
+  QUEUES,
+} from '../infrastructure/queue/queue.constants';
 import { runBackoffStrategy } from '../infrastructure/queue/retry-backoff';
 import { RunQueue } from '../infrastructure/queue/run-queue.service';
+import { HttpPollRunner } from './http-poll-runner';
 import { PrismaRunStore } from './prisma-run-store';
 import { RetentionService } from './retention.service';
 import { ScheduleEvaluator } from './schedule-evaluator';
@@ -121,5 +127,28 @@ export class MaintenanceProcessor extends WorkerHost implements OnApplicationBoo
     if (job.name === JOBS.APPLY_RETENTION && this.config.retention.enabled) {
       await this.retention.run();
     }
+  }
+}
+
+/**
+ * http.poll occurrences (Part 24). A separate queue, so slow third-party APIs never hold up
+ * the sweeper, retention or schedule ticks. A poll never fails its job: failures are recorded
+ * on the poll state and the next occurrence tries again.
+ */
+@Processor(QUEUES.HTTP_POLLS)
+export class HttpPollProcessor extends WorkerHost implements OnApplicationBootstrap {
+  constructor(
+    private readonly runner: HttpPollRunner,
+    private readonly config: AppConfigService,
+  ) {
+    super();
+  }
+
+  onApplicationBootstrap(): void {
+    this.worker.concurrency = this.config.http.pollConcurrency;
+  }
+
+  async process(job: Job<ExecutePollJobData>): Promise<void> {
+    if (job.name === JOBS.EXECUTE_POLL) await this.runner.run(job.data);
   }
 }

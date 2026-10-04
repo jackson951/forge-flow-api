@@ -73,14 +73,16 @@ Paths below are relative to `/api/v1`. The backend roadmap and per-part specific
 | `/auth/*` (register, login, refresh, logout, logout-all, me) | auth |
 | `/workspaces`, `/workspaces/:workspaceId` | workspaces |
 | `/workspaces/:workspaceId/members` (+ `/:userId`) | workspaces |
-| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/versions/:version`, `/duplicate`, `/archive`, `/unarchive`) | workflows |
+| `/workspaces/:workspaceId/workflows` (+ `/draft`, `/validate`, `/publish`, `/versions`, `/versions/:version`, `/duplicate`, `/archive`, `/unarchive`, `/poll`) | workflows |
 | `/node-types` | workflows |
 | `/workspaces/:workspaceId/workflows/:workflowId/runs` (start a manual run, also for schedule workflows; optional `Idempotency-Key`) | runs |
 | `/workspaces/:workspaceId/runs` (+ `/retry`, `/cancel`) | runs |
-| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`, `/:connectionId` DELETE) | integrations |
+| `/workspaces/:workspaceId/integrations` (+ `/:provider/connect`, `/http`, `/:connectionId/test`, `/:connectionId` PATCH / DELETE, `/:connectionId/credentials` PUT) | integrations |
 | `/integrations/providers`, `/integrations/:provider/callback` | integrations |
 | `/workspaces/:workspaceId/dashboard` | dashboard |
 | `/webhooks/:provider` (`github`, `test` in non-production) | webhooks |
+| `/webhooks/hooks/:hookId` (generic inbound webhook, POST/PUT/PATCH/GET as configured) | hooks |
+| `/workspaces/:workspaceId/workflows/:workflowId/webhook` (+ `/rotate-secret`, `/rotate-url`, `/deliveries`, `/deliveries/:deliveryId/replay`, `/listen`) | hooks |
 | `/workspaces/:workspaceId/integrations/:connectionId/github/repositories`, `/slack/channels`, `/microsoft/todo-lists` | integrations |
 | `/health`, `/health/ready` | health |
 

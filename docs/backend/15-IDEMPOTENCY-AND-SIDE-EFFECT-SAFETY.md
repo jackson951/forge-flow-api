@@ -115,11 +115,12 @@ Handler classification table (fill in as handlers ship):
 
 | Handler | sideEffect | Provider idempotency key | On a step found RUNNING after a crash |
 | --- | --- | --- | --- |
-| manual.trigger, schedule.trigger, condition, util.log | none | n/a | re-executed |
+| manual.trigger, schedule.trigger, webhook.received, http.poll, condition, util.log | none | n/a | re-executed |
 | github.issue.created (trigger) | none | n/a | re-executed |
 | ai.summarize, ai.classify, ai.extract | idempotent | n/a (no external state; costs tokens) | re-executed |
 | slack.sendMessage | non-idempotent | none available (`chat.postMessage`) | UNCERTAIN_OUTCOME |
 | microsoft.todo.createTask | non-idempotent | none available (Graph To Do) | UNCERTAIN_OUTCOME |
+| http.request (Part 24) | non-idempotent | `Idempotency-Key: <runId>:<nodeKey>` sent when a POST/PATCH is marked `idempotent` | UNCERTAIN_OUTCOME (attempt retries follow the method: GET/HEAD/PUT/DELETE and `idempotent` POST/PATCH retry transient failures) |
 
 Enforced by `src/engine/execution/side-effects.spec.ts` (the table must match the code) and by the worker's startup check (a handler without a valid `sideEffect` stops the worker).
 
