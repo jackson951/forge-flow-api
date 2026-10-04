@@ -44,6 +44,7 @@ export class TriggerRoutingService {
       await tx.workflowTrigger.createMany({
         data: routes.map((route) => ({
           ...route,
+          filter: route.filter as Prisma.InputJsonObject | undefined,
           workspaceId: workflow.workspaceId,
           workflowId: workflow.id,
           workflowVersionId: version.id,

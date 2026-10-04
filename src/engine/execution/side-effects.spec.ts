@@ -14,6 +14,7 @@ import {
 } from '../../modules/integrations/slack/slack.node-types';
 import { createHttpHandlers } from '../../modules/integrations/http/http.node-types';
 import { WEBHOOK_HANDLERS } from '../../modules/hooks/hook.node-types';
+import { createJiraHandlers } from '../../modules/integrations/jira/jira.node-types';
 import { BUILT_IN_HANDLERS } from './built-in-handlers';
 import { NodeHandlerRegistry } from './handler-registry';
 import { NodeHandler } from './node-handler';
@@ -37,6 +38,16 @@ const REVIEWED: Record<string, NodeHandler['sideEffect']> = {
   'http.request': 'non-idempotent',
   'http.poll': 'none',
   'webhook.received': 'none',
+  'jira.issue.created': 'none',
+  'jira.issue.updated': 'none',
+  'jira.issue.transitioned': 'none',
+  'jira.createIssue': 'non-idempotent',
+  'jira.getIssue': 'idempotent',
+  'jira.updateIssue': 'non-idempotent',
+  'jira.addComment': 'non-idempotent',
+  'jira.transitionIssue': 'non-idempotent',
+  'jira.assignIssue': 'non-idempotent',
+  'jira.searchIssues': 'idempotent',
 };
 
 const productionHandlers = (): NodeHandler[] => [
@@ -47,6 +58,7 @@ const productionHandlers = (): NodeHandler[] => [
   ...createAiHandlers(null, { maxInputChars: 1000, maxOutputTokens: 64 }),
   ...createHttpHandlers({} as never, {} as never, {} as never),
   ...WEBHOOK_HANDLERS,
+  ...createJiraHandlers({} as never, {} as never),
 ];
 
 describe('handler side-effect classification (AC-15.9)', () => {

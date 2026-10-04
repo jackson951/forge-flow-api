@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { ConnectionStatus, IntegrationProviderKey, Prisma } from '@prisma/client';
+import {
+  ConnectionStatus,
+  ConnectionStatusReason,
+  IntegrationProviderKey,
+  Prisma,
+} from '@prisma/client';
 import { EncryptionService } from '../../../infrastructure/crypto/encryption.service';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 
@@ -13,6 +18,7 @@ export interface DecryptedConnection extends Credential {
   connectionId: string;
   provider: IntegrationProviderKey;
   status: ConnectionStatus;
+  statusReason: ConnectionStatusReason | null;
   externalAccountId: string;
 }
 
@@ -113,6 +119,7 @@ export class CredentialStore {
         id: true,
         provider: true,
         status: true,
+        statusReason: true,
         externalAccountId: true,
         credential: {
           select: {
@@ -129,6 +136,7 @@ export class CredentialStore {
       connectionId: connection.id,
       provider: connection.provider,
       status: connection.status,
+      statusReason: connection.statusReason,
       externalAccountId: connection.externalAccountId,
       accessToken: this.open(connection.id, 'accessToken', c?.encryptedAccessToken),
       refreshToken: this.open(connection.id, 'refreshToken', c?.encryptedRefreshToken),

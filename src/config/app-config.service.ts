@@ -70,6 +70,17 @@ export class AppConfigService {
     };
   }
 
+  get jira() {
+    return {
+      clientId: this.get('JIRA_CLIENT_ID'),
+      clientSecret: this.get('JIRA_CLIENT_SECRET'),
+      authUrl: this.get('JIRA_AUTH_URL').replace(/\/+$/, ''),
+      apiUrl: this.get('JIRA_API_URL').replace(/\/+$/, ''),
+      renewWithinMs: this.get('JIRA_WEBHOOK_RENEW_WITHIN_DAYS') * 86_400_000,
+      subscriptionIntervalMs: this.get('SUBSCRIPTION_RENEW_INTERVAL_MS'),
+    };
+  }
+
   get hooks() {
     return {
       maxBodyBytes: this.get('WEBHOOK_HOOK_MAX_BODY_BYTES'),

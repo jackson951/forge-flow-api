@@ -7,7 +7,8 @@ export interface ConnectionDetails {
   externalAccountId: string;
   accountLabel?: string;
   scopes: string[];
-  metadata?: Record<string, string | number | boolean | null>;
+  /** JSON metadata shown with the connection (never secrets), e.g. Jira's site list. */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -53,6 +54,8 @@ export interface IntegrationProvider {
   ): Promise<CompletedConnection>;
   /** Best-effort revocation at the provider on disconnect (if the provider supports it). */
   revoke?(credential: Credential): Promise<void>;
+  /** Best-effort clean-up at the provider before the connection is deleted (e.g. webhooks). */
+  beforeDisconnect?(connection: { id: string; workspaceId: string }): Promise<void>;
 }
 
 export const INTEGRATION_PROVIDERS = Symbol('INTEGRATION_PROVIDERS');

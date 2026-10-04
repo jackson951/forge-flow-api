@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { ConnectionStatus, ErrorCategory, IntegrationProviderKey } from '@prisma/client';
+import {
+  ConnectionStatus,
+  ConnectionStatusReason,
+  ErrorCategory,
+  IntegrationProviderKey,
+} from '@prisma/client';
 import { PermanentError } from '../engine/errors';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { CredentialStore } from '../modules/integrations/credentials/credential-store';
@@ -79,7 +84,10 @@ export class WorkerConnections implements ConnectionAccess, HttpConnectionAccess
   async markNeedsAttention(workspaceId: string, connectionId: string): Promise<void> {
     await this.prisma.integrationConnection.updateMany({
       where: { id: connectionId, workspaceId },
-      data: { status: ConnectionStatus.NEEDS_ATTENTION },
+      data: {
+        status: ConnectionStatus.NEEDS_ATTENTION,
+        statusReason: ConnectionStatusReason.TOKEN_REVOKED,
+      },
     });
   }
 }
