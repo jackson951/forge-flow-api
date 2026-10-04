@@ -59,6 +59,8 @@ export interface GoogleTokens {
 
 export interface GmailHistoryPage {
   history: {
+    /** The record's history id (records come in ascending order). */
+    id?: string;
     messagesAdded?: { message?: { id?: string; labelIds?: string[] } }[];
     labelsAdded?: { message?: { id?: string; labelIds?: string[] }; labelIds?: string[] }[];
   }[];

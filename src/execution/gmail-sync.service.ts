@@ -30,8 +30,12 @@ import { MAX_SUBSCRIPTION_FAILURES, SyncResult } from './jira-subscriptions.serv
 
 /** The one Gmail subscription row of a connection (its mailbox watch). */
 const RESOURCE = 'mailbox';
+/**
+ * Bounds of one resolution. A larger backlog is resolved in several passes: the stored history
+ * id only advances past what was actually processed, and a follow-up resolution is queued
+ * (Part 27: advancing to the mailbox's current id after a truncated pass skipped the rest).
+ */
 const MAX_HISTORY_PAGES = 20;
-/** Messages fetched per resolution; the rest is picked up by the next notification. */
 const MAX_MESSAGES = 200;
 
 interface WatchDetails {
@@ -54,6 +58,8 @@ export interface ResolveResult {
   messages: number;
   runs: number;
   gap: boolean;
+  /** More history remains: a follow-up resolution was queued. */
+  truncated: boolean;
 }
 
 const byHistory = (a: string, b: string) => (BigInt(a) > BigInt(b) ? a : b);
@@ -272,7 +278,7 @@ export class GmailSyncService {
 
   /** New messages since the stored history id → one run per matching (workflow, message). */
   async resolve(connectionId: string): Promise<ResolveResult> {
-    const result: ResolveResult = { messages: 0, runs: 0, gap: false };
+    const result: ResolveResult = { messages: 0, runs: 0, gap: false, truncated: false };
     const runIds: string[] = [];
     await this.locked(connectionId, async () => {
       const sub = await this.prisma.providerSubscription.findUnique({
@@ -288,26 +294,47 @@ export class GmailSyncService {
 
       const added = new Map<string, string[]>();
       const labelAdds = new Map<string, Set<string>>();
+      /** History id of the record where each message first appeared (for a partial pass). */
+      const firstSeen = new Map<string, bigint>();
       let latest = details.historyId;
+      let lastRecord: string | undefined;
+      let current: string | undefined;
       try {
         await this.tokens.withToken(workspaceId, connectionId, async (token) => {
           let pageToken: string | undefined;
           for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
             const res = await this.gmail.history(token, details.historyId!, pageToken);
             for (const h of res.history) {
+              const at = h.id !== undefined ? String(h.id) : undefined;
+              const seen = (id: string) => {
+                if (at && !firstSeen.has(id)) firstSeen.set(id, BigInt(at));
+              };
               for (const m of h.messagesAdded ?? [])
-                if (m.message?.id) added.set(m.message.id, m.message.labelIds ?? []);
+                if (m.message?.id) {
+                  added.set(m.message.id, m.message.labelIds ?? []);
+                  seen(m.message.id);
+                }
               for (const l of h.labelsAdded ?? []) {
                 if (!l.message?.id) continue;
                 const set = labelAdds.get(l.message.id) ?? new Set<string>();
                 for (const id of l.labelIds ?? []) set.add(id);
                 labelAdds.set(l.message.id, set);
+                seen(l.message.id);
               }
+              if (at) lastRecord = at;
             }
-            if (res.historyId) latest = byHistory(latest, res.historyId);
-            if (!res.nextPageToken) break;
+            if (res.historyId) current = res.historyId;
+            if (!res.nextPageToken) {
+              // Everything read: the mailbox's current history id is the new start.
+              if (res.historyId) latest = byHistory(latest, res.historyId);
+              return;
+            }
             pageToken = res.nextPageToken;
           }
+          // Page cap reached: continue after the last record read, not from the current id.
+          result.truncated = true;
+          // (Without record ids there is no safe resume point: fall back to the current id.)
+          latest = byHistory(latest, lastRecord ?? current ?? latest);
         });
       } catch (err) {
         if (!(err instanceof GmailHistoryGoneError)) throw err;
@@ -325,10 +352,22 @@ export class GmailSyncService {
         );
         if (hit.length) matches.set(id, hit);
       }
+      // Oldest first; past MAX_MESSAGES, stop just before the record of the first message left
+      // out (messages of that record already handled are deduplicated by their run key).
+      const ordered = [...matches.entries()].sort(([a], [b]) =>
+        Number((firstSeen.get(a) ?? 0n) - (firstSeen.get(b) ?? 0n)),
+      );
+      const cutoff = ordered.length > MAX_MESSAGES ? firstSeen.get(ordered[MAX_MESSAGES][0]) : null;
+      if (cutoff !== null && cutoff !== undefined) {
+        result.truncated = true;
+        // Always progress: if the cut falls in the first record, resume after that record.
+        const start = BigInt(details.historyId);
+        latest = String(cutoff - 1n > start ? cutoff - 1n : cutoff);
+      }
 
       const rows: Prisma.WorkflowRunCreateManyInput[] = [];
       await this.tokens.withToken(workspaceId, connectionId, async (token) => {
-        for (const [messageId, hit] of [...matches.entries()].slice(0, MAX_MESSAGES)) {
+        for (const [messageId, hit] of ordered.slice(0, MAX_MESSAGES)) {
           let message;
           try {
             message = await this.gmail.message(token, messageId);
@@ -389,6 +428,7 @@ export class GmailSyncService {
           ),
         );
     }
+    if (result.truncated) await this.requestResolve(connectionId);
     this.logger.info({ connectionId, ...result }, 'Gmail history resolved');
     return result;
   }

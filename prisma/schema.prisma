@@ -287,6 +287,8 @@ model WorkflowTrigger {
 
   @@index([provider, eventType, resourceKey])
   @@index([workspaceId])
+  /// Jira/Gmail sync: the published triggers of one connection (Part 27).
+  @@index([connectionId])
 }
 
 /// Time trigger of a workflow's active version (Part 23). Written on publish/archive/unarchive
@@ -320,7 +322,8 @@ model WorkflowSchedule {
   version   WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
 
   // The evaluator's "due" scan: active schedules by next occurrence.
-  @@index([active, nextRunAt])
+  /// Due scan `ORDER BY nextRunAt, id LIMIT n FOR UPDATE SKIP LOCKED` straight from the index (Part 27).
+  @@index([active, nextRunAt, id])
   @@index([workspaceId])
   @@index([workflowVersionId])
 }
@@ -466,6 +469,8 @@ model WorkflowRun {
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status, createdAt])
+  /// Run list filtered by trigger source (SCHEDULE / POLL / ...): Part 27.
+  @@index([workspaceId, triggerSource, createdAt])
   @@index([workflowId, createdAt])
   @@index([status, queuedAt])
   @@index([webhookDeliveryId])
@@ -532,6 +537,8 @@ model IntegrationConnection {
 
   @@unique([workspaceId, provider, externalAccountId])
   @@index([workspaceId])
+  /// Gmail push: the connections watching a mailbox, on every notification (Part 27).
+  @@index([accountLabel])
 }
 
 /// AES-256-GCM ciphertext only. Kept in its own table so a default include/select of a

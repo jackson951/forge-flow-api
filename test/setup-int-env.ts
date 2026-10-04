@@ -14,6 +14,9 @@ process.env.QUEUE_PREFIX ??= `ff-test-${process.pid}-${Date.now()}`;
 // Part 24: the local HTTP test service speaks plain HTTP (https-only is unit-tested). It is
 // reachable only through the egress client's test allowance, never by allowing private ranges.
 process.env.HTTP_ACTION_ALLOW_PLAIN_HTTP ??= 'true';
+// Hook URLs are built from the test server's own address: a public URL from a developer's .env
+// (e.g. an ngrok tunnel for live provider tests) must not leak in.
+process.env.PUBLIC_API_URL = ''; // empty = unset (the .env file is read again by the config module)
 // Fast retries in tests.
 process.env.QUEUE_BACKOFF_MS ??= '50';
 process.env.QUEUE_JOB_ATTEMPTS ??= '3';

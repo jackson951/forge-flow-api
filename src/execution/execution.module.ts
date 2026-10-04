@@ -46,6 +46,7 @@ import { ScheduleEvaluator } from './schedule-evaluator';
 import { RunWorkerService } from './run-worker.service';
 import { WorkerConnections } from './worker-connections';
 import { WorkerHeartbeat } from './worker-heartbeat.service';
+import { WorkerDrain } from './worker-drain.service';
 
 /** Worker-only: the engine, its handlers and the queue processors. */
 @Module({
@@ -172,6 +173,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     WorkflowRunProcessor,
     MaintenanceProcessor,
     WorkerHeartbeat,
+    WorkerDrain,
   ],
   exports: [
     NodeHandlerRegistry,

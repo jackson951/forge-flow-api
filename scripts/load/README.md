@@ -42,3 +42,38 @@ docker compose -p flowforge-perf -f docker-compose.yml -f scripts/load/perf.comp
 The TEST webhook provider and `THROTTLE_ENABLED=false` only work outside production, so the
 perf stack runs the production image with `NODE_ENV=test`. Throttling is off because all k6
 traffic comes from one IP (the webhook limit is 600/min per provider and IP).
+
+## Expanded platform (Part 27)
+
+Results: [docs/backend/27-EXPANDED-PLATFORM-PERFORMANCE-AND-SCALABILITY.md](../../docs/backend/27-EXPANDED-PLATFORM-PERFORMANCE-AND-SCALABILITY.md).
+
+**Query plans** — after `seed-perf.sql`, on the same throwaway database:
+
+```bash
+docker exec -i ffp-postgres psql -U flowforge -d flowforge -v deliveries=1000000 < scripts/load/seed-expanded.sql
+docker exec -i ffp-postgres psql -U flowforge -d flowforge < scripts/load/explain-expanded.sql
+```
+
+A database alone is enough for this (no API/worker containers), e.g.
+`docker run -d --name ff27-explain-pg -p 127.0.0.1:55437:5432 -e POSTGRES_USER=perf -e POSTGRES_PASSWORD=perf postgres:17-alpine`,
+then `DATABASE_URL=postgresql://perf:perf@127.0.0.1:55437/perf npx prisma migrate deploy`, seed, explain, `docker rm -f ff27-explain-pg`.
+
+**Distributed correctness and load** — `test/integration/expanded-scale.int-spec.ts` runs 2 API
+instances, workers, 3 schedule evaluators, concurrent pollers and Gmail resolvers in one process
+against the integration database and Redis, with a local HTTP test service (latency, 429s) and the
+fake Google. It prints one `SCALE_METRIC {...}` line per scenario and asserts the thresholds.
+Volumes are environment variables (defaults are small enough for the regular gate):
+
+```bash
+FF_SCALE_SCHEDULES=10000 FF_SCALE_HTTP_RUNS=1000 FF_SCALE_HOOK_REQUESTS=600 FF_SCALE_JIRA_REQUESTS=400 \
+FF_SCALE_POLLS=200 FF_SCALE_GMAIL_WORKSPACES=6 FF_SCALE_GMAIL_MESSAGES=60 FF_SCALE_SHUTDOWN_RUNS=200 \
+  npx jest --config test/jest-int.json --runInBand test/integration/expanded-scale
+```
+
+Run one scenario with `-t 'FR-27.1'` (etc.). Do not run it while other heavy work shares the
+Docker VM: a contended database is measured as evaluator/intake latency.
+
+| File | Purpose |
+| --- | --- |
+| `seed-expanded.sql` | 10 000 schedule workflows (30 % due at the same minute over 3 timezones, 10 % `http.poll`, 5 % inactive), 5 000 generic webhooks, 2 000 Jira/Gmail connections with subscriptions, 1 000 Jira-routed triggers, `deliveries` generic deliveries over 30 days, 1 000 poll states with full 2 000-id windows, 100 000 SCHEDULE/POLL runs |
+| `explain-expanded.sql` | `EXPLAIN (ANALYZE, BUFFERS)` of the batched due-schedule claim and advance, hook lookup, delivery dedup and log pages, Jira trigger/subscription scans, Gmail mailbox lookup, poll quota and state, run list by trigger source (common and rare), delivery retention |

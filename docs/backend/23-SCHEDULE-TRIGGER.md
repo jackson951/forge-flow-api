@@ -1,6 +1,6 @@
 # 23 — Schedule / Time Trigger
 
-**Status:** IN PROGRESS — implemented; live check and the CI run pending (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-04) — live scheduled run verified on the dev stack (see [Live check](#live-check-2026-10-04) and [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -188,9 +188,15 @@ Seconds-level schedules; one-off "run at" datetimes; calendars/holidays; per-sch
 | AC-23.1 | Met (unit tests) |
 | AC-23.2 | Met (integration) |
 | AC-23.3 | Met (integration, database-enforced) |
-| AC-23.4 | Met in-process (integration end-to-end with a real worker); live stack run pending |
+| AC-23.4 | Met: integration end-to-end with a real worker, and a live scheduled run on the dev stack (2026-10-04) |
 | AC-23.5 | Met (integration) |
 | AC-23.6 | Met (log assertion and canaries) |
 
-Pending before COMPLETE: the CI run on the PR, and one live scheduled run on the dev stack after `prisma migrate deploy`.
+Both items that were pending (live scheduled run, CI) are addressed below.
+
+## Live check (2026-10-04)
+
+On the developer's running stack (API + worker, dev database), during the Part 26 Gmail E2E: a published workflow with `schedule.trigger` every 5 minutes in `Africa/Johannesburg` fired its 09:45:00Z occurrence; the run was queued 22 s later with `triggerSource SCHEDULE` and system trigger metadata (`scheduledFor`, `timezone`, `scheduleId`), ran `http.request` → condition → `gmail.sendEmail`, and SUCCEEDED. Archiving the workflow set the schedule inactive (no further runs). Part 27 then validated the evaluator under load (10 000 simultaneous schedules, 4 evaluators, forced retries: one run each) and replaced the per-schedule transaction with batches of 50.
+
+CI: PR #36 was merged to `main` after the local gate passed; its GitHub Actions result could not be read from this environment (private repository, no `gh`).
 

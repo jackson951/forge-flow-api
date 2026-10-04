@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationShutdown, OnModuleInit, Optional } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AppConfigService } from '../../config/app-config.service';
 
@@ -10,7 +10,7 @@ export const PRISMA_CLIENT_OPTIONS = Symbol('PRISMA_CLIENT_OPTIONS');
  * `connection_limit` is set explicitly so the pool never depends on the container's CPU count.
  */
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class PrismaService extends PrismaClient implements OnModuleInit, OnApplicationShutdown {
   constructor(
     config: AppConfigService,
     @Optional() @Inject(PRISMA_CLIENT_OPTIONS) options: Prisma.PrismaClientOptions = {},
@@ -22,7 +22,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     await this.$connect();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * Last shutdown phase (Part 27): BullMQ workers drain in `beforeApplicationShutdown` and still
+   * need the database; `onModuleDestroy` would disconnect underneath their in-flight jobs.
+   */
+  async onApplicationShutdown(): Promise<void> {
     await this.$disconnect();
   }
 }

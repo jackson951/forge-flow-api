@@ -54,15 +54,35 @@ type Outcome =
 export const occurrenceKey = (scheduleId: string, occurrence: Date) =>
   `schedule:${scheduleId}:${occurrence.toISOString()}`;
 
+/** Due schedules claimed per transaction. */
+export const CLAIM_BATCH = 50;
+
+/**
+ * A batch writes up to CLAIM_BATCH runs and advances; Prisma's 5 s default aborted it on a
+ * contended database (Part 27). An abort commits nothing: the schedules stay due and the next tick
+ * retries them. Other evaluators skip the locked rows meanwhile.
+ */
+const CLAIM_TX = { maxWait: 10_000, timeout: 30_000 };
+
+/** What one claimed schedule turns into (decided in memory, written per batch). */
+interface Plan {
+  due: DueRow;
+  outcome: Outcome;
+  run?: Prisma.WorkflowRunCreateManyInput;
+  update: { next: Date | null; active: boolean; occurrence: Date | null };
+}
+
 /**
  * Schedule trigger evaluator (Part 23), run by the maintenance queue in the worker. It never
  * executes workflows: it records due occurrences as QUEUED runs and enqueues them, exactly
  * like a webhook does.
  *
  * Correctness comes from the database only (FR-23.6):
- * - each due schedule is handled in its own short transaction that locks its row with
- *   `FOR UPDATE SKIP LOCKED`, so workers share the work without waiting for each other;
- * - the run insert and the `nextRunAt` advance commit together;
+ * - due schedules are claimed in batches of up to CLAIM_BATCH per short transaction, each row
+ *   locked with `FOR UPDATE SKIP LOCKED`, so workers share the work without waiting for each
+ *   other (Part 27: one commit per batch instead of per schedule — the evaluator was bound by
+ *   per-transaction overhead at ~23 schedules/s with 3 evaluators);
+ * - the runs insert and the `nextRunAt` advances commit together;
  * - `WorkflowRun(workspaceId, idempotencyKey)` is unique and the key is
  *   `schedule:<id>:<occurrence>`, so a retried tick or any race creates at most one run;
  * - "due" is judged by the database clock (`now()`), never a worker's clock.
@@ -91,17 +111,23 @@ export class ScheduleEvaluator {
       deactivated: 0,
       polls: 0,
     };
-    for (let i = 0; i < this.config.schedule.batchSize; i++) {
-      const outcome = await this.evaluateNext();
-      if (!outcome) break;
-      if (outcome.kind === 'deactivated') {
-        result.deactivated++;
-        continue;
+    let handled = 0;
+    while (handled < this.config.schedule.batchSize) {
+      const outcomes = await this.evaluateBatch(
+        Math.min(CLAIM_BATCH, this.config.schedule.batchSize - handled),
+      );
+      if (!outcomes.length) break;
+      handled += outcomes.length;
+      for (const outcome of outcomes) {
+        if (outcome.kind === 'deactivated') {
+          result.deactivated++;
+          continue;
+        }
+        result.skipped += outcome.skipped;
+        if (outcome.kind === 'fired') result.fired++;
+        if (outcome.kind === 'duplicate') result.duplicates++;
+        if (outcome.kind === 'poll') result.polls++;
       }
-      result.skipped += outcome.skipped;
-      if (outcome.kind === 'fired') result.fired++;
-      if (outcome.kind === 'duplicate') result.duplicates++;
-      if (outcome.kind === 'poll') result.polls++;
     }
     // Scheduled runs are never refused, but a backlog is reported like for webhooks.
     if (result.fired) await this.backpressure.observe('schedule');
@@ -111,25 +137,27 @@ export class ScheduleEvaluator {
     return result;
   }
 
-  /** Handles the most overdue unlocked schedule; null when none is due. */
-  async evaluateNext(): Promise<Outcome | null> {
-    const outcome = await this.prisma.$transaction((tx) => this.claimAndFire(tx));
-    if (outcome?.kind === 'fired' && outcome.enqueue) await this.enqueue(outcome.enqueue);
-    if (outcome?.kind === 'poll') {
-      const { scheduleId, occurrence } = outcome;
-      await this.polls.enqueue({ scheduleId, occurrence }).catch((err: Error) =>
-        // Polling is state-based: the next occurrence catches up on whatever is new.
-        this.logger.warn(
-          { scheduleId, occurrence, error: err.message },
-          'Poll enqueue failed; skipped',
-        ),
-      );
+  /** Claims up to `limit` due schedules in one transaction; empty when none is due. */
+  async evaluateBatch(limit = CLAIM_BATCH): Promise<Outcome[]> {
+    const outcomes = await this.prisma.$transaction((tx) => this.claimAndFire(tx, limit), CLAIM_TX);
+    for (const outcome of outcomes) {
+      if (outcome.kind === 'fired' && outcome.enqueue) await this.enqueue(outcome.enqueue);
+      if (outcome.kind === 'poll') {
+        const { scheduleId, occurrence } = outcome;
+        await this.polls.enqueue({ scheduleId, occurrence }).catch((err: Error) =>
+          // Polling is state-based: the next occurrence catches up on whatever is new.
+          this.logger.warn(
+            { scheduleId, occurrence, error: err.message },
+            'Poll enqueue failed; skipped',
+          ),
+        );
+      }
     }
-    return outcome;
+    return outcomes;
   }
 
-  private async claimAndFire(tx: Prisma.TransactionClient): Promise<Outcome | null> {
-    const [due] = await tx.$queryRaw<DueRow[]>`
+  private async claimAndFire(tx: Prisma.TransactionClient, limit: number): Promise<Outcome[]> {
+    const claimed = await tx.$queryRaw<DueRow[]>`
       SELECT s.id, s."workspaceId", s."workflowId", s."workflowVersionId", s.cron, s.timezone,
              s."nextRunAt", now() AS "dbNow", w.status AS "workflowStatus",
              w."activeVersionId", w."workspaceId" AS "workflowWorkspaceId", s.kind
@@ -137,10 +165,70 @@ export class ScheduleEvaluator {
       JOIN "Workflow" w ON w.id = s."workflowId"
       WHERE s.active AND s."nextRunAt" <= now()
       ORDER BY s."nextRunAt", s.id
-      LIMIT 1
+      LIMIT ${limit}
       FOR UPDATE OF s SKIP LOCKED`;
-    if (!due) return null;
+    if (!claimed.length) return [];
+    const plans = claimed.map((due) => this.plan(due));
+
+    // All new runs in one statement. ON CONFLICT DO NOTHING: an occurrence that already has a
+    // run (retried tick, race) is a duplicate, never an error that aborts the batch.
+    const rows = plans.flatMap((p) => (p.run ? [p.run] : []));
+    const inserted = new Set<string>();
+    if (rows.length) {
+      await tx.workflowRun.createMany({ data: rows, skipDuplicates: true });
+      const found = await tx.workflowRun.findMany({
+        where: { id: { in: rows.map((r) => r.id!) } },
+        select: { id: true },
+      });
+      for (const r of found) inserted.add(r.id);
+    }
+
+    // All schedule advances in one statement.
+    const toIso = (d: Date | null) => (d ? d.toISOString() : null);
+    await tx.$executeRaw`
+      UPDATE "WorkflowSchedule" AS s
+      SET "nextRunAt" = v.next,
+          active = v.active,
+          "lastOccurrenceAt" = COALESCE(v.occ, s."lastOccurrenceAt"),
+          "lastRunId" = COALESCE(v.run, s."lastRunId"),
+          "updatedAt" = now()
+      FROM unnest(
+        ${plans.map((p) => p.due.id)}::text[]::uuid[],
+        ${plans.map((p) => toIso(p.update.next))}::text[]::timestamptz[],
+        ${plans.map((p) => p.update.active)}::boolean[],
+        ${plans.map((p) => toIso(p.update.occurrence))}::text[]::timestamptz[],
+        ${plans.map((p) => (p.run && inserted.has(p.run.id!) ? p.run.id! : null))}::text[]::uuid[]
+      ) AS v(id, next, active, occ, run)
+      WHERE s.id = v.id`;
+
+    return plans.map((p) => {
+      if (p.outcome.kind !== 'fired' || !p.run) return p.outcome;
+      if (inserted.has(p.run.id!)) return p.outcome;
+      this.logger.info(
+        {
+          scheduleId: p.due.id,
+          workflowId: p.due.workflowId,
+          workspaceId: p.due.workspaceId,
+          scheduledFor: (p.outcome.enqueue as { scheduledFor: string }).scheduledFor,
+          workerId: this.workerId,
+        },
+        'Schedule occurrence already has a run; duplicate suppressed',
+      );
+      return { kind: 'duplicate', skipped: p.outcome.skipped };
+    });
+  }
+
+  /** The rules for one claimed schedule, decided in memory (no I/O). */
+  private plan(due: DueRow): Plan {
     const ids = { scheduleId: due.id, workflowId: due.workflowId, workspaceId: due.workspaceId };
+    const stop = (reason: string): Plan => {
+      this.logger.warn({ ...ids, reason, workerId: this.workerId }, 'Schedule deactivated');
+      return {
+        due,
+        outcome: { kind: 'deactivated' },
+        update: { next: null, active: false, occurrence: null },
+      };
+    };
 
     // FR-23.10: only a published workflow whose active version is this schedule's, in the
     // schedule's own workspace, may run. Anything else stops the schedule.
@@ -149,7 +237,7 @@ export class ScheduleEvaluator {
       due.activeVersionId !== due.workflowVersionId ||
       due.workflowWorkspaceId !== due.workspaceId
     ) {
-      return this.deactivate(tx, due, 'the workflow is no longer published with this version');
+      return stop('the workflow is no longer published with this version');
     }
 
     let occurrence: ReturnType<typeof dueOccurrence>;
@@ -162,11 +250,7 @@ export class ScheduleEvaluator {
       );
     } catch (err) {
       // E.g. the timezone is no longer known to this runtime.
-      return this.deactivate(
-        tx,
-        due,
-        `the schedule cannot be evaluated: ${(err as Error).message}`,
-      );
+      return stop(`the schedule cannot be evaluated: ${(err as Error).message}`);
     }
 
     const skipped = occurrence.skipped + (occurrence.skippedBeforeWindow ? 1 : 0);
@@ -183,112 +267,65 @@ export class ScheduleEvaluator {
         'Missed schedule occurrences skipped (only the latest within the grace window runs)',
       );
     }
-
-    // http.poll (Part 24): the occurrence is a poll, run by the poll queue; items become runs.
-    if (due.kind === ScheduleKind.POLL) {
-      await tx.workflowSchedule.update({
-        where: { id: due.id },
-        data: {
-          nextRunAt: occurrence.next,
-          active: occurrence.next !== null,
-          ...(occurrence.fire && { lastOccurrenceAt: occurrence.fire }),
-        },
-      });
-      return occurrence.fire
-        ? { kind: 'poll', skipped, scheduleId: due.id, occurrence: occurrence.fire.toISOString() }
-        : { kind: 'skipped', skipped };
-    }
-
-    let runId: string | null = null;
-    let correlationId: string | null = null;
-    if (occurrence.fire) {
-      const fire = occurrence.fire;
-      const candidate = randomUUID();
-      correlationId = randomUUID();
-      const triggerInput: ScheduleTriggerInput = {
-        triggerType: 'SCHEDULE',
-        scheduledFor: fire.toISOString(),
-        triggeredAt: due.dbNow.toISOString(),
-        timezone: due.timezone,
-        scheduleId: due.id,
-      };
-      // ON CONFLICT DO NOTHING: a duplicate must not abort the transaction.
-      const { count } = await tx.workflowRun.createMany({
-        data: [
-          {
-            id: candidate,
-            workspaceId: due.workspaceId,
-            workflowId: due.workflowId,
-            workflowVersionId: due.workflowVersionId,
-            triggerSource: TriggerSource.SCHEDULE,
-            idempotencyKey: occurrenceKey(due.id, fire),
-            triggerInput: triggerInput as unknown as Prisma.InputJsonObject,
-            correlationId,
-          },
-        ],
-        skipDuplicates: true,
-      });
-      if (count === 1) {
-        runId = candidate;
-      } else {
-        this.logger.info(
-          { ...ids, scheduledFor: fire.toISOString(), workerId: this.workerId },
-          'Schedule occurrence already has a run; duplicate suppressed',
-        );
-      }
-    }
-
-    await tx.workflowSchedule.update({
-      where: { id: due.id },
-      data: {
-        nextRunAt: occurrence.next,
-        active: occurrence.next !== null,
-        ...(occurrence.fire && { lastOccurrenceAt: occurrence.fire }),
-        ...(runId && { lastRunId: runId }),
-      },
-    });
     if (!occurrence.next) {
       this.logger.warn(
         { ...ids, workerId: this.workerId },
         'Schedule deactivated: it never runs again',
       );
     }
+    const update = {
+      next: occurrence.next,
+      active: occurrence.next !== null,
+      occurrence: occurrence.fire,
+    };
 
-    if (!occurrence.fire) return { kind: 'skipped', skipped };
-    if (!runId) return { kind: 'duplicate', skipped };
+    // http.poll (Part 24): the occurrence is a poll, run by the poll queue; items become runs.
+    if (due.kind === ScheduleKind.POLL) {
+      return {
+        due,
+        update,
+        outcome: occurrence.fire
+          ? { kind: 'poll', skipped, scheduleId: due.id, occurrence: occurrence.fire.toISOString() }
+          : { kind: 'skipped', skipped },
+      };
+    }
+    if (!occurrence.fire) return { due, update, outcome: { kind: 'skipped', skipped } };
+
+    const fire = occurrence.fire;
+    const runId = randomUUID();
+    const correlationId = randomUUID();
+    const triggerInput: ScheduleTriggerInput = {
+      triggerType: 'SCHEDULE',
+      scheduledFor: fire.toISOString(),
+      triggeredAt: due.dbNow.toISOString(),
+      timezone: due.timezone,
+      scheduleId: due.id,
+    };
     return {
-      kind: 'fired',
-      skipped,
-      enqueue: {
-        ...ids,
-        runId,
+      due,
+      update,
+      run: {
+        id: runId,
+        workspaceId: due.workspaceId,
+        workflowId: due.workflowId,
+        workflowVersionId: due.workflowVersionId,
+        triggerSource: TriggerSource.SCHEDULE,
+        idempotencyKey: occurrenceKey(due.id, fire),
+        triggerInput: triggerInput as unknown as Prisma.InputJsonObject,
         correlationId,
-        scheduledFor: occurrence.fire.toISOString(),
-        lagMs: due.dbNow.getTime() - occurrence.fire.getTime(),
+      },
+      outcome: {
+        kind: 'fired',
+        skipped,
+        enqueue: {
+          ...ids,
+          runId,
+          correlationId,
+          scheduledFor: fire.toISOString(),
+          lagMs: due.dbNow.getTime() - fire.getTime(),
+        },
       },
     };
-  }
-
-  private async deactivate(
-    tx: Prisma.TransactionClient,
-    due: DueRow,
-    reason: string,
-  ): Promise<Outcome> {
-    await tx.workflowSchedule.update({
-      where: { id: due.id },
-      data: { active: false, nextRunAt: null },
-    });
-    this.logger.warn(
-      {
-        scheduleId: due.id,
-        workflowId: due.workflowId,
-        workspaceId: due.workspaceId,
-        reason,
-        workerId: this.workerId,
-      },
-      'Schedule deactivated',
-    );
-    return { kind: 'deactivated' };
   }
 
   /** After the commit. A failure leaves the run QUEUED; the sweeper re-enqueues it. */

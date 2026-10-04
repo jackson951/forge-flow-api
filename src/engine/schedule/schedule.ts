@@ -126,9 +126,27 @@ export function compileSchedule(spec: ScheduleSpec): CompiledSchedule {
   return { cron, timezone: spec.timezone };
 }
 
+/**
+ * Parsed crons by expression and timezone (Part 27: parsing on every call was ~2 ms of CPU per
+ * evaluated schedule). `nextRun(from)` does not depend on earlier calls, so sharing is safe.
+ */
+const CRON_CACHE_MAX = 1_000;
+const cronCache = new Map<string, Cron>();
+
+function cronFor(schedule: CompiledSchedule): Cron {
+  const key = `${schedule.timezone}\u0000${schedule.cron}`;
+  let cron = cronCache.get(key);
+  if (!cron) {
+    cron = new Cron(schedule.cron, { timezone: schedule.timezone, paused: true });
+    if (cronCache.size >= CRON_CACHE_MAX) cronCache.delete(cronCache.keys().next().value!);
+    cronCache.set(key, cron);
+  }
+  return cron;
+}
+
 /** The first occurrence strictly after `after`, or null if the schedule never fires again. */
 export function nextOccurrence(schedule: CompiledSchedule, after: Date): Date | null {
-  const cron = new Cron(schedule.cron, { timezone: schedule.timezone, paused: true });
+  const cron = cronFor(schedule);
   let from = after;
   // The library is strictly-after for single steps; guard anyway (a repeat would stall
   // the evaluator on one occurrence).
