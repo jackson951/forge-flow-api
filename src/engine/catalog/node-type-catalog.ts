@@ -11,6 +11,8 @@ export interface TriggerRoute {
   /** Provider-specific routing key, e.g. "<installationId>:owner/repo". */
   resourceKey: string;
   connectionId?: string;
+  /** Provider-specific filter checked on delivery (e.g. Jira projects / issue types / statuses). */
+  filter?: Record<string, unknown>;
 }
 
 /** Static description of a node type: what config it accepts. Handlers (Part 08) are separate. */

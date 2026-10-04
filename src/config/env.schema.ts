@@ -204,6 +204,15 @@ export const envSchema = z
     SLACK_API_URL: z.string().url().default('https://slack.com/api'),
     SLACK_OAUTH_URL: z.string().url().default('https://slack.com/oauth/v2/authorize'),
     OAUTH_REDIRECT_BASE_URL: z.string().url().optional(),
+    /** Jira Cloud (Part 25): an Atlassian OAuth 2.0 (3LO) app from developer.atlassian.com. */
+    JIRA_CLIENT_ID: z.preprocess(emptyAsUnset, z.string().optional()),
+    JIRA_CLIENT_SECRET: z.preprocess(emptyAsUnset, z.string().optional()),
+    JIRA_AUTH_URL: z.string().url().default('https://auth.atlassian.com'),
+    JIRA_API_URL: z.string().url().default('https://api.atlassian.com'),
+    /** Every renewal tick refreshes Jira webhooks expiring within this many days (they last 30). */
+    JIRA_WEBHOOK_RENEW_WITHIN_DAYS: z.coerce.number().int().min(1).max(29).default(7),
+    /** How often the worker re-syncs and renews provider subscriptions (Jira webhooks). */
+    SUBSCRIPTION_RENEW_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
 
     /** Enables the non-production `test` webhook provider (Part 09). Ignored in production. */
     WEBHOOK_TEST_SECRET: z.string().min(16).optional(),
@@ -288,7 +297,10 @@ export const envSchema = z
       });
     }
 
-    if ((env.SLACK_CLIENT_ID || env.MICROSOFT_CLIENT_ID) && !env.ENCRYPTION_KEYS) {
+    if (
+      (env.SLACK_CLIENT_ID || env.MICROSOFT_CLIENT_ID || env.JIRA_CLIENT_ID) &&
+      !env.ENCRYPTION_KEYS
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['ENCRYPTION_KEYS'],

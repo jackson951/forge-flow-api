@@ -154,7 +154,7 @@ export class WebhookIntakeService {
       ? await tx.workflowTrigger.findMany({
           where: {
             provider: provider.key,
-            eventType: event.eventType,
+            eventType: { in: event.eventTypes ?? [event.eventType] },
             resourceKey: event.resourceKey,
             workflow: { status: WorkflowStatus.PUBLISHED },
           },
@@ -162,6 +162,9 @@ export class WebhookIntakeService {
             workspaceId: true,
             workflowId: true,
             workflowVersionId: true,
+            eventType: true,
+            connectionId: true,
+            filter: true,
             workflow: { select: { activeVersionId: true } },
             connection: { select: { externalAccountId: true, status: true, workspaceId: true } },
           },
@@ -175,7 +178,13 @@ export class WebhookIntakeService {
         (event!.accountId === undefined ||
           (t.connection?.externalAccountId === event!.accountId &&
             t.connection.status === ConnectionStatus.CONNECTED &&
-            t.connection.workspaceId === t.workspaceId)),
+            t.connection.workspaceId === t.workspaceId)) &&
+        // Connection-bound providers (Jira): only the connection that received it.
+        (event!.connectionId === undefined ||
+          (t.connectionId === event!.connectionId &&
+            t.connection?.status === ConnectionStatus.CONNECTED &&
+            t.connection.workspaceId === t.workspaceId)) &&
+        (provider.matches ? provider.matches(event!, t.filter, t.eventType) : true),
     );
 
     let connectionsUpdated = 0;

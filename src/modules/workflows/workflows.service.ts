@@ -15,6 +15,7 @@ import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
+import { ProviderSyncRequester } from './provider-sync.service';
 import { TriggerRoutingService } from './trigger-routing.service';
 
 const SUMMARY_SELECT = {
@@ -67,6 +68,7 @@ export class WorkflowsService {
     private readonly validator: DefinitionValidatorService,
     private readonly audit: AuditService,
     private readonly routing: TriggerRoutingService,
+    private readonly providerSync: ProviderSyncRequester,
   ) {}
 
   async list(workspaceId: string, query: ListWorkflowsQueryDto): Promise<Page<WorkflowSummary>> {
@@ -199,7 +201,7 @@ export class WorkflowsService {
   /** Archived workflows stop triggering (their trigger routing rows are removed). */
   async archive(workspaceId: string, userId: string, id: string): Promise<WorkflowSummary> {
     await this.findOwned(workspaceId, id);
-    return this.prisma.$transaction(async (tx) => {
+    const archived = await this.prisma.$transaction(async (tx) => {
       await this.routing.deactivate(tx, id);
       const workflow = await tx.workflow.update({
         where: { id },
@@ -218,12 +220,14 @@ export class WorkflowsService {
       );
       return workflow;
     });
+    await this.providerSync.request(workspaceId);
+    return archived;
   }
 
   /** Returns to PUBLISHED (re-activating the active version's triggers) or DRAFT. */
   async unarchive(workspaceId: string, userId: string, id: string): Promise<WorkflowSummary> {
     const current = await this.findOwned(workspaceId, id);
-    return this.prisma.$transaction(async (tx) => {
+    const restored = await this.prisma.$transaction(async (tx) => {
       if (current.activeVersionId) {
         const active = await tx.workflowVersion.findUniqueOrThrow({
           where: { id: current.activeVersionId },
@@ -250,6 +254,8 @@ export class WorkflowsService {
       );
       return workflow;
     });
+    await this.providerSync.request(workspaceId);
+    return restored;
   }
 
   /** Hard delete only while no run references the workflow; otherwise archive it. */
@@ -278,6 +284,7 @@ export class WorkflowsService {
       }
       throw err;
     }
+    await this.providerSync.request(workspaceId);
   }
 
   /**

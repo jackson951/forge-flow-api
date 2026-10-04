@@ -3,6 +3,9 @@ import { CredentialStore } from './credentials/credential-store';
 import { GitHubClient } from './github/github-client';
 import { MicrosoftClient } from './microsoft/microsoft-client';
 import { MicrosoftTokenManager } from './microsoft/microsoft-token-manager';
+import { JiraClient } from './jira/jira-client';
+import { JiraTokenManager } from './jira/jira-token-manager';
+import { JiraProvider } from './providers/jira.provider';
 import { SlackClient } from './slack/slack-client';
 import { IntegrationProvidersController, IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
@@ -23,12 +26,15 @@ import { SlackProvider } from './providers/slack.provider';
     SlackClient,
     MicrosoftClient,
     MicrosoftTokenManager,
+    JiraClient,
+    JiraTokenManager,
     GitHubProvider,
     MicrosoftProvider,
     SlackProvider,
+    JiraProvider,
     {
       provide: INTEGRATION_PROVIDERS,
-      inject: [GitHubProvider, MicrosoftProvider, SlackProvider],
+      inject: [GitHubProvider, MicrosoftProvider, SlackProvider, JiraProvider],
       useFactory: (...providers: IntegrationProvider[]) => providers,
     },
     IntegrationsService,

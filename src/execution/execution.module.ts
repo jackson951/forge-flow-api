@@ -24,6 +24,10 @@ import { createSlackHandlers } from '../modules/integrations/slack/slack.node-ty
 import { ProviderConcurrencyLimiter } from '../engine/execution/provider-slots';
 import { PrismaRunStore } from './prisma-run-store';
 import { HttpPollRunner } from './http-poll-runner';
+import { JiraSubscriptionsService } from './jira-subscriptions.service';
+import { JiraClient } from '../modules/integrations/jira/jira-client';
+import { JiraTokenManager } from '../modules/integrations/jira/jira-token-manager';
+import { createJiraHandlers } from '../modules/integrations/jira/jira.node-types';
 import {
   HttpPollProcessor,
   MaintenanceProcessor,
@@ -46,6 +50,8 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     WorkerConnections,
     MicrosoftClient,
     MicrosoftTokenManager,
+    JiraClient,
+    JiraTokenManager,
     {
       provide: NODE_HANDLERS,
       inject: [
@@ -56,6 +62,8 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         MicrosoftClient,
         MicrosoftTokenManager,
         EgressClient,
+        JiraClient,
+        JiraTokenManager,
       ],
       useFactory: (
         ai: AiProvider | null,
@@ -65,6 +73,8 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         microsoft: MicrosoftClient,
         microsoftTokens: MicrosoftTokenManager,
         egress: EgressClient,
+        jira: JiraClient,
+        jiraTokens: JiraTokenManager,
       ): NodeHandler[] => [
         ...BUILT_IN_HANDLERS,
         ...WEBHOOK_HANDLERS,
@@ -72,6 +82,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
         ...createSlackHandlers(slack, connections),
         ...createMicrosoftHandlers(microsoft, microsoftTokens),
         ...createAiHandlers(ai, config.ai),
+        ...createJiraHandlers(jira, jiraTokens),
         ...createHttpHandlers(egress, connections, {
           policy: config.http.policy,
           maxResponseBytes: config.http.maxResponseBytes,
@@ -125,6 +136,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     ScheduleEvaluator,
     HttpPollRunner,
     HttpPollProcessor,
+    JiraSubscriptionsService,
     WorkflowRunProcessor,
     MaintenanceProcessor,
     WorkerHeartbeat,
@@ -137,6 +149,7 @@ import { WorkerHeartbeat } from './worker-heartbeat.service';
     RetentionService,
     ScheduleEvaluator,
     HttpPollRunner,
+    JiraSubscriptionsService,
   ],
 })
 export class ExecutionModule implements OnModuleInit {

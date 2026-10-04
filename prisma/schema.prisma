@@ -33,12 +33,29 @@ enum IntegrationProviderKey {
   HTTP
   /// Generic inbound webhooks (Part 24): deliveries to /webhooks/hooks/:hookId.
   WEBHOOK
+  /// Jira Cloud (Part 25): OAuth 2.0 (3LO), dynamic webhooks.
+  JIRA
 }
 
 enum ConnectionStatus {
   CONNECTED
   NEEDS_ATTENTION
   DISCONNECTED
+}
+
+/// Why a connection needs attention (Part 25; shared by all providers).
+enum ConnectionStatusReason {
+  TOKEN_REVOKED
+  TOKEN_EXPIRED
+  APP_UNINSTALLED
+  PERMISSION_CHANGED
+  WATCH_RENEWAL_FAILED
+  AUTHENTICATION_FAILED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  FAILING
 }
 
 enum WorkflowStatus {
@@ -157,18 +174,19 @@ model Workspace {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  members     WorkspaceMember[]
-  workflows   Workflow[]
-  versions    WorkflowVersion[]
-  triggers    WorkflowTrigger[]
-  schedules   WorkflowSchedule[]
-  webhooks    WorkflowWebhook[]
-  pollStates  HttpPollState[]
-  runs        WorkflowRun[]
-  connections IntegrationConnection[]
-  oauthStates OAuthState[]
-  deliveries  WebhookDelivery[]
-  auditEvents AuditEvent[]
+  members       WorkspaceMember[]
+  workflows     Workflow[]
+  versions      WorkflowVersion[]
+  triggers      WorkflowTrigger[]
+  schedules     WorkflowSchedule[]
+  webhooks      WorkflowWebhook[]
+  pollStates    HttpPollState[]
+  subscriptions ProviderSubscription[]
+  runs          WorkflowRun[]
+  connections   IntegrationConnection[]
+  oauthStates   OAuthState[]
+  deliveries    WebhookDelivery[]
+  auditEvents   AuditEvent[]
 }
 
 model WorkspaceMember {
@@ -255,6 +273,8 @@ model WorkflowTrigger {
   eventType         String
   /// Provider-specific routing key, e.g. "<installationId>:owner/repo".
   resourceKey       String
+  /// Provider-specific filter checked on delivery (e.g. Jira projects / issue types / statuses).
+  filter            Json?
   connectionId      String?                @db.Uuid
   createdAt         DateTime               @default(now()) @db.Timestamptz(3)
 
@@ -372,6 +392,36 @@ model HttpPollState {
   @@index([workspaceId])
 }
 
+/// A webhook (or watch) registered at a provider for one connection and one provider resource
+/// (Part 25: a Jira dynamic webhook per connection and site). Provider registrations expire and
+/// are renewed by the worker; failures are counted and surface on the connection.
+model ProviderSubscription {
+  id                  String                 @id @default(uuid()) @db.Uuid
+  workspaceId         String                 @db.Uuid
+  connectionId        String                 @db.Uuid
+  provider            IntegrationProviderKey
+  /// Provider resource the registration belongs to (Jira: cloudId).
+  resourceKey         String
+  /// The provider's registration ids (Jira webhook ids).
+  externalIds         String[]
+  /// What was registered (Jira: events, JQL, project keys); compared on every sync.
+  details             Json
+  status              SubscriptionStatus     @default(ACTIVE)
+  expiresAt           DateTime?              @db.Timestamptz(3)
+  lastRenewedAt       DateTime?              @db.Timestamptz(3)
+  consecutiveFailures Int                    @default(0)
+  lastError           String?
+  createdAt           DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime               @updatedAt @db.Timestamptz(3)
+
+  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, resourceKey])
+  @@index([expiresAt])
+  @@index([workspaceId])
+}
+
 // ── Execution history ────────────────────────────────────────────────────────
 
 model WorkflowRun {
@@ -456,24 +506,27 @@ model StepRun {
 
 /// Connected external account — metadata only. Secrets live in IntegrationCredential.
 model IntegrationConnection {
-  id                String                 @id @default(uuid()) @db.Uuid
-  workspaceId       String                 @db.Uuid
+  id                String                  @id @default(uuid()) @db.Uuid
+  workspaceId       String                  @db.Uuid
   provider          IntegrationProviderKey
-  status            ConnectionStatus       @default(CONNECTED)
+  status            ConnectionStatus        @default(CONNECTED)
+  /// Set with NEEDS_ATTENTION; cleared when the connection works again (reconnect, renewal).
+  statusReason      ConnectionStatusReason?
   /// Provider account id (GitHub installation id, Slack team id, Entra object id).
   externalAccountId String
   accountLabel      String?
   scopes            String[]
   metadata          Json?
-  createdById       String?                @db.Uuid
-  lastUsedAt        DateTime?              @db.Timestamptz(3)
-  createdAt         DateTime               @default(now()) @db.Timestamptz(3)
-  updatedAt         DateTime               @updatedAt @db.Timestamptz(3)
+  createdById       String?                 @db.Uuid
+  lastUsedAt        DateTime?               @db.Timestamptz(3)
+  createdAt         DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                @updatedAt @db.Timestamptz(3)
 
-  workspace  Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy  User?                  @relation("ConnectionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  credential IntegrationCredential?
-  triggers   WorkflowTrigger[]
+  workspace     Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User?                  @relation("ConnectionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  credential    IntegrationCredential?
+  triggers      WorkflowTrigger[]
+  subscriptions ProviderSubscription[]
 
   @@unique([workspaceId, provider, externalAccountId])
   @@index([workspaceId])

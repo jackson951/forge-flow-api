@@ -12,6 +12,7 @@ import { DefinitionValidatorService } from '../../engine/executor/definition-val
 import { hasErrors } from '../../engine/validation/graph-validator';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { ProviderSyncRequester } from './provider-sync.service';
 import { TriggerRoutingService } from './trigger-routing.service';
 
 const VERSION_SUMMARY_SELECT = {
@@ -42,6 +43,7 @@ export class PublishingService {
     private readonly routing: TriggerRoutingService,
     private readonly audit: AuditService,
     private readonly catalog: NodeTypeCatalog,
+    private readonly providerSync: ProviderSyncRequester,
   ) {}
 
   async publish(
@@ -50,7 +52,7 @@ export class PublishingService {
     workflowId: string,
     expectedRevision: number,
   ): Promise<VersionSummary> {
-    return this.prisma.$transaction(async (tx) => {
+    const published = await this.prisma.$transaction(async (tx) => {
       // Row lock: concurrent publishes of one workflow run one after the other, so version
       // numbers stay gapless; the (workflowId, version) unique constraint is the backstop.
       await tx.$queryRaw`
@@ -140,6 +142,9 @@ export class PublishingService {
 
       return { ...created, isActive: true };
     });
+    // Provider registrations (e.g. Jira webhooks) follow after the commit.
+    await this.providerSync.request(workspaceId);
+    return published;
   }
 
   async listVersions(

@@ -7,12 +7,25 @@ export interface InboundWebhook {
   /** Exact bytes as received — signatures are computed over these, never re-serialised JSON. */
   rawBody: Buffer;
   body: unknown;
+  /** Query string (Jira: the signed connection/site parameters of the registered URL). */
+  query?: Record<string, unknown>;
 }
 
 /** Provider-neutral event used for trigger matching and as the run's trigger input. */
 export interface NormalizedEvent {
   /** Matches WorkflowTrigger.eventType, e.g. "issues.opened". */
   eventType: string;
+  /**
+   * Every trigger event type this delivery satisfies (default `[eventType]`), e.g. a Jira
+   * update with a status change is both "jira.issue.updated" and "jira.issue.transitioned".
+   */
+  eventTypes?: string[];
+  /**
+   * The connection whose provider registration received the delivery (Jira). When set, only
+   * triggers on exactly that CONNECTED connection match — another workspace connected to the
+   * same provider account never receives it.
+   */
+  connectionId?: string;
   /** Matches WorkflowTrigger.resourceKey, e.g. "<installationId>:owner/repo". */
   resourceKey: string;
   /** Becomes `trigger.*` in the workflow. Only fields workflows need; no secrets. */
@@ -46,6 +59,8 @@ export interface WebhookProvider {
   eventName(request: InboundWebhook): string;
   /** null = an event type FlowForge does not act on (stored as IGNORED). */
   normalize(request: InboundWebhook): NormalizedEvent | null;
+  /** Provider-specific trigger filter (WorkflowTrigger.filter); absent = every trigger matches. */
+  matches?(event: NormalizedEvent, filter: unknown, eventType: string): boolean;
 }
 
 export const WEBHOOK_PROVIDERS = Symbol('WEBHOOK_PROVIDERS');
