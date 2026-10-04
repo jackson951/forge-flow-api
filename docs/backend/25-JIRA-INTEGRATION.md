@@ -1,6 +1,6 @@
 # 25 — Jira Cloud Integration
 
-**Status:** NOT STARTED (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** IN PROGRESS: implemented and green against a simulated Atlassian; the real Jira Cloud E2E (AC-25.6) is pending (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -119,3 +119,115 @@ Jira Data Center/Server, Jira Service Management/Confluence, attachments, issue 
 ## Implementation Notes
 
 Mirror the Slack/Microsoft structure (`src/modules/integrations/jira/{jira.provider,jira-client,jira.node-types,jira-webhook.provider}.ts`); register node types in the catalog like the others; keep the trigger/action names consistent with existing conventions (`github.issue.created`, `slack.sendMessage`). Mapping from the roadmap request names: `jira.issue.create → jira.createIssue`, `jira.issue.get → jira.getIssue`, `jira.issue.update → jira.updateIssue`, `jira.issue.comment → jira.addComment`, `jira.issue.transition → jira.transitionIssue`, `jira.issue.assign → jira.assignIssue`, `jira.issue.search → jira.searchIssues`.
+
+## Verified against Atlassian documentation (2026-10-04)
+
+Checked before implementation, as the Risks section asks:
+
+- **3LO.** The authorize URL `https://auth.atlassian.com/authorize` takes `audience=api.atlassian.com`, `client_id`, `scope`, `redirect_uri`, `state`, `response_type=code` and `prompt=consent`. The token endpoint is `POST https://auth.atlassian.com/oauth/token` (JSON body). Refresh tokens rotate: each new one invalidates the previous one, and one expires after 90 days of inactivity. An expired or invalid refresh token returns 403. Sites come from `GET https://api.atlassian.com/oauth/token/accessible-resources`, and REST calls go to `https://api.atlassian.com/ex/jira/{cloudId}/...`. PKCE is not documented for 3LO, and there is no token revocation endpoint (users revoke under "Connected apps"). Source: developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps.
+- **Dynamic webhooks for OAuth 2.0 apps.**
+  - Register with `POST /rest/api/3/webhook` (`url` must use the app's base URL; `webhooks: [{ events, jqlFilter }]`). Webhooks expire 30 days after creation or refresh; `PUT /rest/api/3/webhook/refresh` extends them by 30 days.
+  - The limit is 5 webhooks per app per user per site.
+  - JQL supports only `issueKey`, `project`, `issuetype`, `status`, `priority`, `assignee`, `reporter`, `issue.property` and `cf[id]`, with the operators `=`, `!=`, `IN` and `NOT IN`.
+  - Deliveries carry `X-Atlassian-Webhook-Identifier` and `X-Atlassian-Webhook-Retry`. They are "secured by bearer authentication … signed with the app's client secret".
+  - Source: developer.atlassian.com/cloud/jira/platform/webhooks.
+- **Not stated by the docs:** the JWT algorithm. HS256 is assumed, since it is the HMAC-SHA256 shared-secret scheme Atlassian uses elsewhere. To confirm in the real-site E2E. If it differs, deliveries fail verification with a logged reason (`unexpected token algorithm` / `token signature mismatch`); they never pass silently.
+
+## Implementation Evidence (2026-10-04)
+
+**Delivered**
+- **Connect** (`JiraProvider`, `JiraClient`): authorization code flow with the documented parameters and single-use `state`; scopes are checked on exchange, and a missing scope gives `not_authorized`.
+  - **One connection per Atlassian grant** (`externalAccountId` = Atlassian account id from `/me`). The grant's Jira sites (Confluence-only resources left out) are stored in the connection metadata, and every Jira node chooses a `siteId`. This is the spec's "site chosen per node" option. One connection per site would hold several copies of one rotating refresh token, and refreshing any copy invalidates the rest.
+  - Reconnect replaces the tokens on the same connection and clears `statusReason`.
+  - Disconnect deletes the dynamic webhooks at Jira (best effort, new `beforeDisconnect` provider hook), then the tokens and registrations.
+- **Shared `OAuthTokenManager`** (`src/modules/integrations/oauth/`): one implementation of locked refresh, rotation saved in the same transaction, single refresh for concurrent callers, and 401 → one forced refresh + retry. `MicrosoftTokenManager` is now a subclass with its behaviour unchanged (Microsoft unit and integration tests green). `JiraTokenManager` is a subclass that also checks a site belongs to the connection.
+- **`ConnectionStatusReason`** (deferred by Part 24, added here) on `IntegrationConnection.statusReason`:
+  - revoked grant → `TOKEN_REVOKED` (Jira, Microsoft, Slack);
+  - Microsoft 403 → `PERMISSION_CHANGED`;
+  - a fresh token rejected again → `AUTHENTICATION_FAILED`;
+  - 3 failed webhook renewals → `WATCH_RENEWAL_FAILED`, which a later success clears. A renewal failure leaves the tokens usable, so actions keep working and renewal can retry.
+- **Triggers** `jira.issue.created`, `jira.issue.updated` and `jira.issue.transitioned` (filter `projectKeys` 1–20, optional `issueTypes`; transitioned also `fromStatus` / `toStatus`). They are routed by `WorkflowTrigger` (resourceKey = site, `connectionId`, new `filter` column).
+- **Webhook intake** `POST /webhooks/jira` (`JiraWebhookProvider`) on the Part 09 pipeline:
+  - requires both Atlassian's bearer JWT (HS256, client secret, exp/nbf with 60 s leeway, `alg` must be HS256) and our signed URL parameters (connection + site, HMAC with the client secret);
+  - dedup = Atlassian identifier + fingerprint of event, issue, changelog and timestamp;
+  - one delivery can satisfy several event types (an update with a status change is both "updated" and "transitioned");
+  - routed only to the connection whose webhook received it, so another workspace connected to the same Atlassian account never matches;
+  - normalised output `{ event, issue { id, key, summary, description (text, ≤ 4 000), status, statusCategory, type, priority, project, assignee, reporter, labels, url, created, updated }, changes [{ field, from, to }], transition?, actor, site }`.
+  - The pipeline gained, for every provider: `query` on inbound requests, `eventTypes`, `connectionId` binding and `matches(filter)`.
+- **Webhook lifecycle** (`JiraSubscriptionsService`, worker; generic `ProviderSubscription` table, which Gmail will reuse):
+  - one dynamic webhook per (connection, site) with JQL `project IN (…)`, the union of the published triggers' projects (keeps within Atlassian's 5-per-site limit; issue type and status are filtered by FlowForge);
+  - registered, re-registered on change (old deleted first) and deleted when unused;
+  - renewed when expiring within `JIRA_WEBHOOK_RENEW_WITHIN_DAYS` (7);
+  - a periodic maintenance job (`SUBSCRIPTION_RENEW_INTERVAL_MS`, 1 h) plus an on-demand per-workspace job requested after publish / archive / unarchive / delete commit, so publishing never waits for Jira;
+  - sync and renewal of one connection are serialised with a Postgres advisory lock (see "Found while testing").
+- **Actions:**
+  - `jira.createIssue`: project, issue type (name or id), summary, description (text → ADF), priority, labels, assignee account id, up to 20 `customfield_*` values.
+  - `jira.getIssue`, `jira.updateIssue`, `jira.addComment` (text → ADF).
+  - `jira.transitionIssue`: target status name resolved through the issue's transitions, or a transition id.
+  - `jira.assignIssue`: account id or `unassigned`.
+  - `jira.searchIssues`: `POST /search/jql`, ≤ 100 results.
+
+  Outputs use the normalised issue shape. Rendered issue keys are validated before they reach a URL. Side effects: writes are `non-idempotent` (Jira has no idempotency key), reads are `idempotent`; AC-15.9 table and Part 15 doc updated. Provider slot group: `jira`.
+- **Error mapping** (`mapJiraError`):
+  - 401 → refresh + retry;
+  - 403 → `AUTHORIZATION`;
+  - 404 / 409 → `PERMANENT_PROVIDER_ERROR`;
+  - 400 → `VALIDATION` with Jira's field messages (safe subset);
+  - 429 / 503 → retry with `Retry-After`;
+  - other 5xx → retry for reads, `UNCERTAIN_OUTCOME` for writes;
+  - network and timeouts through the shared Part 15 classifier.
+- **Pickers**: `GET /workspaces/:ws/integrations/:connectionId/jira/sites` (read live, refreshes the stored sites), `/jira/projects?siteId&query`, `/jira/issue-types?siteId&project`, `/jira/statuses?siteId&project`, `/jira/users?siteId&project&query`. Minimal fields only: no e-mail addresses, and inactive users left out.
+- **Settings:** `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET`, `JIRA_AUTH_URL`, `JIRA_API_URL`, `JIRA_WEBHOOK_RENEW_WITHIN_DAYS`, `SUBSCRIPTION_RENEW_INTERVAL_MS`. Migration `20261005090000_jira`.
+
+**Decisions / deviations from this spec**
+- **Site chosen per node** (above), not one connection per site.
+- **No per-trigger JQL filter:** one webhook per site cannot carry each trigger's own JQL (Atlassian's 5-webhook limit); projects, issue types and statuses cover the filtering.
+- **The optional `GET …/trigger-status` endpoint** is not built. Registration state is in `ProviderSubscription` and visible on the connection through `statusReason`.
+- **`jira.createIssue`** reads the created issue back for the normalised output; if that read fails, the step still succeeds with `{ id, key, url }`.
+- **Issue keys** may be logged; summaries and descriptions are not.
+
+**Found while testing**
+- **Concurrent syncs** (the on-demand job and the periodic one, or two quick publishes) could both register a webhook for the same change. The row kept only the second, orphaning the first at Jira; disconnect then could not remove it. Fixed with a per-connection advisory lock (`pg_advisory_xact_lock`) around sync and renewal; pinned by a test with three concurrent syncs.
+- **Renewal could never heal:** the token manager refused connections in `NEEDS_ATTENTION`, so after 3 failed renewals the connection stayed flagged forever. A `WATCH_RENEWAL_FAILED` connection is now usable (its tokens are fine), and the next successful renewal clears it.
+
+**Verification**
+- Unit: `src/modules/integrations/jira/jira.spec.ts`, 13 tests covering:
+  - ADF round trip, issue normalisation, the Jira and token error tables;
+  - signed URL parameters (tampered site / connection / secret);
+  - bearer JWT (valid, wrong secret, missing, expired, `alg: none`, malformed);
+  - adapter verify / normalize / filters / dedup;
+  - node config validation and routing; JQL.
+  - Microsoft unit tests unchanged (31) after the token manager refactor. Full unit suite: 52 suites / 734 tests.
+- Integration: `test/integration/jira.int-spec.ts`, 23/23 against `FakeJira` (simulated 3LO with rotating refresh tokens, REST v3, dynamic webhooks):
+  - connect with the documented parameters, sites stored and tokens encrypted; missing scopes refused; one refresh for concurrent callers, with rotation;
+  - all seven actions chained (ADF bodies, transition resolution, normalised outputs);
+  - a rendered non-key refused before any call; a foreign site refused;
+  - create 5xx → `UNCERTAIN_OUTCOME` with a single call; reads retried on 5xx and 429; 403 / 404 / 400 mapped; 401 → refresh + retry;
+  - publish registers one webhook with the projects JQL; a delivery gives one SUCCEEDED run with the normalised issue; Atlassian retry deduplicated; other project ignored; bad token or tampered URL → 401;
+  - transitioned filter on to-status; a second workspace on the same Atlassian account gets nothing;
+  - new projects re-register, archive removes, unarchive restores; concurrent syncs leave exactly one webhook;
+  - renewal before expiry; 3 failures → `WATCH_RENEWAL_FAILED`, then healed;
+  - pickers with minimal fields and foreign site → 422; another workspace gets 404 / `CONNECTION_INVALID`;
+  - revoked grant → `TOKEN_REVOKED`, and reconnect heals it on the same connection;
+  - disconnect deletes the webhooks and tokens; no secret in logs.
+
+- Full integration suite: 25 suites, 392 tests. The first run failed 2 tests outside Jira. One asserted the exact connection response, which now includes `statusReason`. The other was an ordering flake in the Part 24 poll test: runs inserted together share `createdAt`, now sorted by item id. Both were fixed and re-run green, together with the Microsoft suite (token manager refactor) and the route inventory: 55/55.
+
+## Setup guide (real Jira Cloud)
+
+1. Create a free Jira Cloud site (atlassian.com/software/jira/free).
+2. At developer.atlassian.com/console/myapps, create an **OAuth 2.0 integration**:
+   - Permissions → Jira API: add `read:jira-work`, `write:jira-work`, `read:jira-user` and `manage:jira-webhook`. User identity API: `read:me`.
+   - Authorization → callback URL `https://<public-url>/api/v1/integrations/jira/callback`.
+3. Set `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET`, `OAUTH_REDIRECT_BASE_URL=https://<public-url>/api/v1/integrations` and `PUBLIC_API_URL=https://<public-url>` (for example an ngrok URL, as in Parts 10/13). Webhooks go to `https://<public-url>/api/v1/webhooks/jira`, the same base URL as the app.
+4. Connect Jira from the integrations page, then publish "Jira issue created → Slack" and create an issue in Jira (S25.1 / AC-25.6).
+
+| AC | Status |
+| --- | --- |
+| AC-25.1 | Met (mock-provider integration) |
+| AC-25.2 | Met (integration) |
+| AC-25.3 | Met (integration) |
+| AC-25.4 | Met (integration; the clock is moved by setting `expiresAt`) |
+| AC-25.5 | Met (integration) |
+| AC-25.6 | **Pending**: the real Jira Cloud E2E (Scenario 3) needs a Jira site, an Atlassian app and a public URL; it also confirms the JWT algorithm assumption |
+

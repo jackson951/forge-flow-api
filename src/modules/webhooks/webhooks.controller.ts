@@ -46,7 +46,12 @@ export class WebhooksController {
   ): Promise<IntakeResult> {
     const result = await this.intake.receive(
       provider,
-      { headers: req.headers, rawBody: req.rawBody ?? Buffer.alloc(0), body },
+      {
+        headers: req.headers,
+        rawBody: req.rawBody ?? Buffer.alloc(0),
+        body,
+        query: req.query as Record<string, unknown>,
+      },
       req.id,
     );
     res.status(result.duplicate ? HttpStatus.OK : HttpStatus.ACCEPTED);
