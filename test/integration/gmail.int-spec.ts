@@ -359,6 +359,20 @@ describe('Gmail integration (integration)', () => {
       expect((await runsOf(inboxWorkflow)).length - before).toBe(3);
     });
 
+    it('a backlog past the page cap resolves in several passes without skipping mail (Part 27)', async () => {
+      const before = (await runsOf(inboxWorkflow)).length;
+      for (let i = 0; i < 45; i++) fake.receive({ subject: `backlog ${i}` }); // 20 pages × 2 < 45
+      const first = await sync().resolve(connectionId);
+      expect(first).toMatchObject({ gap: false, runs: 40, truncated: true });
+      expect((await subscriptionOf()).details).toMatchObject({
+        historyId: String(fake.historyId - 5),
+      });
+      await sync().resolve(connectionId); // (the queued follow-up may also have run: same result)
+      expect((await runsOf(inboxWorkflow)).length - before).toBe(45);
+      expect(await sync().resolve(connectionId)).toMatchObject({ runs: 0, truncated: false });
+      expect((await subscriptionOf()).details).toMatchObject({ historyId: String(fake.historyId) });
+    });
+
     it('a label trigger fires for that label only; the watch covers the union of labels', async () => {
       const labelWorkflow = await publish(
         [trigger('gmail.email.labelReceived', { labelId: 'Label_support' }), log],

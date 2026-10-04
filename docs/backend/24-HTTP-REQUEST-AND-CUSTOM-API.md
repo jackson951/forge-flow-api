@@ -1,6 +1,6 @@
 # 24 — Generic HTTP: Outbound Requests and Inbound Triggers (Custom API)
 
-**Status:** IN PROGRESS: all three slices implemented (outbound, `webhook.received`, `http.poll`). Before COMPLETE: the CI run on the PR and a live check against a real API (see the end of this file) (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE (2026-10-04) — all three slices implemented; live `http.request` against a real public API verified (see [Live check](#live-check-2026-10-04) and [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -409,3 +409,10 @@ This was written while implementing slice 1, not before coding as the DoD asks. 
   - an automated test of the workspace daily webhook cap;
   - the threat model was written during slice 1, not before it.
 
+
+
+## Live check (2026-10-04)
+
+On the developer's running stack: `http.request` GET `https://api.github.com/repos/nodejs/node` through the egress guard (public DNS resolution, TLS) returned 200 with the normalised output (`status`, headers without sensitive ones, parsed JSON `body`), and a condition on `steps.fetch.output.status` plus templates on `steps.fetch.output.body.*` drove a `gmail.sendEmail` report (Part 26 Scenario 1). Under load (Part 27): 1 000 `http.request` runs with 200 ms latency and 429 + `Retry-After` stayed at the provider limit (3 in flight), every limited request succeeded on retry, `util.log` runs were not starved; 200 `http.poll` triggers with 3 concurrent pollers and a restart produced exactly one run per new item; generic webhooks over 2 APIs with 20 % concurrent duplicates created no duplicate runs.
+
+CI: PR #37 was merged to `main` after the local gate passed; its GitHub Actions result could not be read from this environment (private repository, no `gh`).

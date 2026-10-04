@@ -1,6 +1,6 @@
 # 25 — Jira Cloud Integration
 
-**Status:** IN PROGRESS: implemented and green against a simulated Atlassian; the real Jira Cloud E2E (AC-25.6) is pending (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE: implemented, green against a simulated Atlassian, and verified end to end on a real Jira Cloud site (2026-10-04) (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
 
 ## Objective
 
@@ -131,7 +131,7 @@ Checked before implementation, as the Risks section asks:
   - JQL supports only `issueKey`, `project`, `issuetype`, `status`, `priority`, `assignee`, `reporter`, `issue.property` and `cf[id]`, with the operators `=`, `!=`, `IN` and `NOT IN`.
   - Deliveries carry `X-Atlassian-Webhook-Identifier` and `X-Atlassian-Webhook-Retry`. They are "secured by bearer authentication … signed with the app's client secret".
   - Source: developer.atlassian.com/cloud/jira/platform/webhooks.
-- **Not stated by the docs:** the JWT algorithm. HS256 is assumed, since it is the HMAC-SHA256 shared-secret scheme Atlassian uses elsewhere. To confirm in the real-site E2E. If it differs, deliveries fail verification with a logged reason (`unexpected token algorithm` / `token signature mismatch`); they never pass silently.
+- **Not stated by the docs:** the JWT algorithm. HS256 was assumed, since it is the HMAC-SHA256 shared-secret scheme Atlassian uses elsewhere. **Confirmed by the real-site E2E** (2026-10-04): real Atlassian deliveries verified with HS256 and the app's client secret.
 
 ## Implementation Evidence (2026-10-04)
 
@@ -229,5 +229,19 @@ Checked before implementation, as the Risks section asks:
 | AC-25.3 | Met (integration) |
 | AC-25.4 | Met (integration; the clock is moved by setting `expiresAt`) |
 | AC-25.5 | Met (integration) |
-| AC-25.6 | **Pending**: the real Jira Cloud E2E (Scenario 3) needs a Jira site, an Atlassian app and a public URL; it also confirms the JWT algorithm assumption |
+| AC-25.6 | **Met (live)** for every Jira leg on a real Jira Cloud site; see "Real Jira Cloud E2E" below. The GitHub and Slack legs of Scenario 3 were not chained in this run (each was verified live in Parts 10 and 13) |
+
+## Real Jira Cloud E2E (2026-10-04)
+
+**Setup.** The product owner's free Jira Cloud site (`jacksonkhuto591.atlassian.net`, project `SCRUM`) and their Atlassian OAuth 2.0 app. The local API and worker ran on the dev stack, reached by Jira through an ngrok tunnel (`PUBLIC_API_URL`). A dedicated test user / workspace on the dev backend was used, and the OAuth flow was driven through the API. The product owner did the Atlassian login and consent in their browser (the frontend has no Jira card yet).
+
+| Step | Result |
+| --- | --- |
+| Connect: `POST …/integrations/JIRA/connect` → Atlassian consent → `GET /integrations/jira/callback` | `CONNECTED`; scopes `read:jira-work write:jira-work read:jira-user manage:jira-webhook read:me offline_access`; site `jacksonkhuto591` stored in the connection metadata |
+| Pickers: projects, issue types, statuses, assignable users | `SCRUM` "Flow Forge"; Epic / Subtask / Task / Story; To Do / In Progress / In Review / Done; one assignable user (no e-mail returned) |
+| Actions, one manual run: create → comment → transition "In Progress" → assign → update summary → get → search (JQL) | Run SUCCEEDED, all 8 steps. **SCRUM-5** created with an ADF description, comment 10000, moved to In Progress, assigned, renamed, read back, found by `project = SCRUM AND labels = flowforge-e2e` |
+| Publish `jira.issue.created` and `jira.issue.transitioned` (toStatus Done) on SCRUM | Dynamic webhook registered at Jira by the worker: webhook id 1, JQL `project IN ("SCRUM")`, expiry 30 days out, subscription ACTIVE |
+| A workflow created **SCRUM-6** and moved it to Done; Jira sent the webhooks through the public URL | Two real deliveries (created, updated) passed both checks (signed URL + Atlassian bearer JWT, **HS256 confirmed**) and were stored `PROCESSED`. "Issue created" run SUCCEEDED (`event jira.issue.created`, issue SCRUM-6, status To Do, URL to the site); "transitioned" run SUCCEEDED (`transition: To Do → Done`) |
+
+Not run live (covered by the mock-provider suite): refresh-token rotation over time, revocation, renewal near expiry, and disconnect. These depend on time passing or on destructive steps on the real account.
 

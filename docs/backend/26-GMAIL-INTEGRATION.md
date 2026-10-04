@@ -1,6 +1,6 @@
 # 26 — Gmail Integration
 
-**Status:** IN PROGRESS: implemented and green against a simulated Google; the real-mailbox E2E (AC-26.6) is pending (see [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md))
+**Status:** COMPLETE WITH EXCEPTIONS (2026-10-04): verified end to end against a real Gmail mailbox (OAuth, watch, Pub/Sub push, history resolution, all seven actions, Scenario 1). Exception: Scenario 2's AI step was not run live (no Anthropic key, as in Part 22) — see [Real Gmail E2E](#real-gmail-e2e-2026-10-04) and [00-BACKEND-ROADMAP.md](00-BACKEND-ROADMAP.md)
 
 ## Objective
 
@@ -251,5 +251,23 @@ Full mail access (`https://mail.google.com/`) is not requested. Restricted scope
 | AC-26.3 | Met (integration; expiry simulated by setting `expiresAt`) |
 | AC-26.4 | Met (integration) |
 | AC-26.5 | Met (canaries + minimised storage) |
-| AC-26.6 | **Pending**: real mailbox E2E (Scenarios 2 and 1) needs a Google Cloud project, Pub/Sub and a public URL |
+| AC-26.6 | **Partial**: Scenario 1 passed with a real mailbox; Scenario 2's Gmail trigger verified live, its AI step not run live (no Anthropic key; Jira and Slack actions verified live in their own parts) — [Real Gmail E2E](#real-gmail-e2e-2026-10-04) |
+
+## Real Gmail E2E (2026-10-04)
+
+Against the developer's running backend (API + worker) and a real Google Cloud project (OAuth client in testing mode, Pub/Sub topic + authenticated push subscription), public URL via ngrok; a throwaway FlowForge user/workspace created through the API. The operator only gave OAuth consent and sent emails; everything else was driven through the API and checked in the database.
+
+| Step | Result |
+| --- | --- |
+| Provider status | `GMAIL configured: true` once the backend was restarted with the variables (env is read at startup) |
+| Connect | Google consent (PKCE S256, `access_type=offline`, `prompt=consent`) → callback → connection `CONNECTED`, label = the mailbox, scopes `gmail.modify`, `gmail.send`, `userinfo.email`, `openid` |
+| Labels picker | 18 labels returned (system + user) |
+| Watch on publish | Publishing "Gmail new email → util.log" created the `mailbox` subscription: `users.watch` accepted, `INBOX`, expiry +7 days, start history id stored |
+| Push → runs | First pushes did not arrive: the Pub/Sub push subscription was misconfigured on the Google side (fixed by the operator; FlowForge returned 401 to unsigned requests throughout). After the fix Pub/Sub redelivered the queued notifications: 5+ pushes `PROCESSED`, OIDC-verified → **4 runs for 4 inbox messages, all SUCCEEDED, 0 duplicates**; a 5th run later for a newly arrived message |
+| Self-sent mail | The actions test's own send and reply (from the mailbox itself) created **no** trigger runs, as designed |
+| All seven actions | One manual run, every email addressed only to the operator's own mailbox: `sendEmail` → `getEmail` (minimised message) → `addLabel STARRED` → `removeLabel STARRED` → `markAsRead` → `markAsUnread` → `replyToEmail` (same thread, `inReplyTo` set). All 8 steps SUCCEEDED, attempt 1; label/read state confirmed by Gmail's responses |
+| Scenario 1 (daily operations) | `schedule.trigger` every 5 min (Africa/Johannesburg) → `http.request` GET `https://api.github.com/repos/nodejs/node` → condition `status == 200` → `gmail.sendEmail` report. Occurrence 09:45:00Z → run queued 22 s later (`triggerSource SCHEDULE`), fetch 200, condition true, report sent, false branch SKIPPED. Workflow archived afterwards (schedule inactive) |
+| Scenario 2 (email triage) | Gmail trigger verified live (above). The AI classify/extract step was not run live: no Anthropic API key (Part 22 deferral). `jira.createIssue` verified live in Part 25, Slack in Part 13 |
+
+Setup note: the push subscription's **endpoint** is `https://<public-url>/api/v1/webhooks/gmail`; its **audience** may be any string as long as it equals `GMAIL_PUSH_AUDIENCE`.
 
