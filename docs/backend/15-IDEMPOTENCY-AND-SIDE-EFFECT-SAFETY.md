@@ -115,7 +115,7 @@ Handler classification table (fill in as handlers ship):
 
 | Handler | sideEffect | Provider idempotency key | On a step found RUNNING after a crash |
 | --- | --- | --- | --- |
-| manual.trigger, schedule.trigger, webhook.received, condition, util.log | none | n/a | re-executed |
+| manual.trigger, schedule.trigger, webhook.received, http.poll, condition, util.log | none | n/a | re-executed |
 | github.issue.created (trigger) | none | n/a | re-executed |
 | ai.summarize, ai.classify, ai.extract | idempotent | n/a (no external state; costs tokens) | re-executed |
 | slack.sendMessage | non-idempotent | none available (`chat.postMessage`) | UNCERTAIN_OUTCOME |

@@ -11,7 +11,9 @@ import {
   EgressPolicy,
   hostAllowed,
 } from '../../../infrastructure/egress/egress-policy';
+import { scheduleConfigSchema, ScheduleSpec } from '../../../engine/schedule/schedule';
 import { applyAuth, HEADER_NAME, HttpConnectionMetadata, RESERVED_HEADERS } from './http-auth';
+import { DOT_PATH } from './http-poll';
 import {
   buildBody,
   classifyStatus,
@@ -24,6 +26,7 @@ import {
 } from './http-request';
 
 export const HTTP_REQUEST = 'http.request';
+export const HTTP_POLL = 'http.poll';
 
 /** Header names that carry credentials: they belong in an HTTP connection (FR-24.2). */
 const CREDENTIAL_HEADERS =
@@ -122,8 +125,109 @@ export function httpRequestConfigSchema(policy: EgressPolicy) {
 
 type HttpRequestConfig = z.infer<ReturnType<typeof httpRequestConfigSchema>>;
 
-export function httpNodeTypes(policy: EgressPolicy, enabled: boolean): NodeTypeDefinition[] {
+const dotPath = z.string().regex(DOT_PATH, 'use a dot path such as data.items');
+
+/**
+ * `http.poll` trigger (FR-24.16): a scheduled request whose new items each start a run. No
+ * templates (there is no upstream data); a cursor from the previous response is sent as a
+ * query parameter instead.
+ */
+export function httpPollConfigSchema(policy: EgressPolicy, minIntervalMinutes: number) {
+  return z
+    .object({
+      connectionId: z.string().uuid().optional(),
+      request: z
+        .object({
+          method: z.enum(['GET', 'POST']).default('GET'),
+          url: z
+            .string()
+            .trim()
+            .min(1)
+            .max(2_048)
+            .refine((u) => !templated(u), 'templates are not available in a poll request'),
+          query: limitedRecord(z.string().min(1).max(200), z.string().max(2_048), 50),
+          headers: limitedRecord(headerName, headerValue, 50),
+          body: z
+            .discriminatedUnion('type', [
+              z.object({ type: z.literal('none') }).strict(),
+              z.object({ type: z.literal('json'), value: z.unknown() }).strict(),
+            ])
+            .default({ type: 'none' }),
+          timeoutMs: z.number().int().min(1_000).max(30_000).default(10_000),
+        })
+        .strict(),
+      schedule: scheduleConfigSchema(minIntervalMinutes).shape.schedule,
+      /** Where the items are: a dot path to an array; omitted = the whole response is one item. */
+      items: z.object({ path: dotPath.optional() }).strict().default({}),
+      /** Item identity: a dot path to an id field; omitted = a hash of the item's content. */
+      identity: z.object({ path: dotPath.optional() }).strict().default({}),
+      /** Incremental APIs: the value at `responsePath` is sent as `queryParam` next time. */
+      cursor: z
+        .object({
+          responsePath: dotPath,
+          queryParam: z
+            .string()
+            .regex(/^[A-Za-z0-9_.-]{1,100}$/, 'must be a simple parameter name'),
+        })
+        .strict()
+        .optional(),
+      /** The first poll records what exists without starting runs. */
+      seedOnFirstPoll: z.boolean().default(true),
+      maxItemsPerPoll: z.number().int().min(1).max(100).default(50),
+    })
+    .strict()
+    .superRefine((config, ctx) => {
+      const { request } = config;
+      if (request.method === 'GET' && request.body.type !== 'none') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['request', 'body'],
+          message: 'GET requests cannot have a body',
+        });
+      }
+      if (/^[a-z][a-z0-9+.-]*:/i.test(request.url)) {
+        try {
+          checkUrl(request.url, policy);
+        } catch (err) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['request', 'url'],
+            message:
+              err instanceof EgressBlockedError ? err.message : 'URL must be a valid absolute URL',
+          });
+        }
+      } else if (!config.connectionId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['request', 'url'],
+          message: 'Use an absolute URL (https://…), or a connection with a base URL',
+        });
+      }
+    });
+}
+
+export type HttpPollConfig = z.infer<ReturnType<typeof httpPollConfigSchema>>;
+
+export function httpNodeTypes(
+  policy: EgressPolicy,
+  enabled: boolean,
+  minIntervalMinutes = 5,
+): NodeTypeDefinition[] {
+  const unavailable = !enabled && {
+    unavailableReason: 'HTTP requests are disabled on this server',
+  };
   return [
+    {
+      type: HTTP_POLL,
+      kind: 'TRIGGER',
+      displayName: 'Poll an HTTP API',
+      configSchema: httpPollConfigSchema(policy, minIntervalMinutes),
+      connectionProvider: IntegrationProviderKey.HTTP,
+      connectionOptional: true,
+      schedule: (config) => (config as { schedule: ScheduleSpec }).schedule,
+      scheduleKind: 'POLL',
+      ...unavailable,
+    },
     {
       type: HTTP_REQUEST,
       kind: 'ACTION',
@@ -161,6 +265,13 @@ export function createHttpHandlers(
   connections: HttpConnectionAccess,
   settings: HttpHandlerSettings,
 ): NodeHandler[] {
+  // http.poll: its output is the item the poll found (the run's trigger input).
+  const pollTrigger: NodeHandler = {
+    type: HTTP_POLL,
+    kind: 'TRIGGER',
+    sideEffect: 'none',
+    execute: async ({ triggerInput }) => ({ output: triggerInput ?? {} }),
+  };
   const handler: NodeHandler = {
     type: HTTP_REQUEST,
     kind: 'ACTION',
@@ -275,5 +386,5 @@ export function createHttpHandlers(
       return { output: scrubSecrets(output, Object.values(connection?.secrets ?? {})) };
     },
   };
-  return [handler];
+  return [handler, pollTrigger];
 }

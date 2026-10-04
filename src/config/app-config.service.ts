@@ -59,6 +59,8 @@ export class AppConfigService {
       enabled: this.get('HTTP_ACTION_ENABLED') ?? true,
       maxResponseBytes: this.get('HTTP_ACTION_MAX_RESPONSE_BYTES'),
       maxStoredBodyBytes: this.get('HTTP_ACTION_MAX_STORED_BODY_BYTES'),
+      maxPollsPerWorkspace: this.get('HTTP_POLL_MAX_PER_WORKSPACE'),
+      pollConcurrency: this.get('HTTP_POLL_CONCURRENCY'),
       policy: {
         allowPlainHttp: this.get('HTTP_ACTION_ALLOW_PLAIN_HTTP') ?? false,
         allowPrivateNetworks: this.get('HTTP_ACTION_ALLOW_PRIVATE_NETWORKS') ?? false,

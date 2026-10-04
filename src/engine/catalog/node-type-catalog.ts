@@ -29,6 +29,8 @@ export interface NodeTypeDefinition {
    * WorkflowSchedule row on publish.
    */
   schedule?: (config: Record<string, unknown>) => ScheduleSpec;
+  /** POLL: an occurrence polls an HTTP API instead of starting a run (http.poll, Part 24). */
+  scheduleKind?: 'RUN' | 'POLL';
   /**
    * Generic inbound webhooks only (Part 24): the validated trigger config, stored on the
    * workflow's WorkflowWebhook row on publish.

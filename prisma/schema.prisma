@@ -52,6 +52,19 @@ enum TriggerSource {
   MANUAL
   RETRY
   SCHEDULE
+  /// http.poll (Part 24): one run per new item found by a poll.
+  POLL
+}
+
+/// What a schedule occurrence does (Part 24): start a run, or poll an HTTP API.
+enum ScheduleKind {
+  RUN
+  POLL
+}
+
+enum PollStatus {
+  OK
+  FAILING
 }
 
 enum RunStatus {
@@ -150,6 +163,7 @@ model Workspace {
   triggers    WorkflowTrigger[]
   schedules   WorkflowSchedule[]
   webhooks    WorkflowWebhook[]
+  pollStates  HttpPollState[]
   runs        WorkflowRun[]
   connections IntegrationConnection[]
   oauthStates OAuthState[]
@@ -196,6 +210,7 @@ model Workflow {
   trigger       WorkflowTrigger?
   schedule      WorkflowSchedule?
   webhook       WorkflowWebhook?
+  pollState     HttpPollState?
   deliveries    WebhookDelivery[]
   runs          WorkflowRun[]
 
@@ -255,10 +270,10 @@ model WorkflowTrigger {
 /// Time trigger of a workflow's active version (Part 23). Written on publish/archive/unarchive
 /// in the same transaction; the maintenance job turns due occurrences into runs.
 model WorkflowSchedule {
-  id                String    @id @default(uuid()) @db.Uuid
-  workspaceId       String    @db.Uuid
-  workflowId        String    @unique @db.Uuid
-  workflowVersionId String    @db.Uuid
+  id                String       @id @default(uuid()) @db.Uuid
+  workspaceId       String       @db.Uuid
+  workflowId        String       @unique @db.Uuid
+  workflowVersionId String       @db.Uuid
   /// Compiled 5-field cron expression, evaluated in `timezone`.
   cron              String
   /// IANA timezone, e.g. "Africa/Johannesburg".
@@ -267,14 +282,16 @@ model WorkflowSchedule {
   config            Json
   /// Human-readable summary, e.g. "Weekdays at 07:00 (Africa/Johannesburg)".
   description       String
+  /// RUN: an occurrence is a run (schedule.trigger). POLL: an occurrence is a poll (http.poll).
+  kind              ScheduleKind @default(RUN)
   /// False while the workflow is archived.
-  active            Boolean   @default(true)
-  nextRunAt         DateTime? @db.Timestamptz(3)
-  lastOccurrenceAt  DateTime? @db.Timestamptz(3)
+  active            Boolean      @default(true)
+  nextRunAt         DateTime?    @db.Timestamptz(3)
+  lastOccurrenceAt  DateTime?    @db.Timestamptz(3)
   /// Run created for the last occurrence (no foreign key: retention may delete runs).
-  lastRunId         String?   @db.Uuid
-  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
+  lastRunId         String?      @db.Uuid
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime     @updatedAt @db.Timestamptz(3)
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   workflow  Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
@@ -323,6 +340,36 @@ model WorkflowWebhook {
 
   @@index([workspaceId])
   @@index([workflowVersionId])
+}
+
+/// State of a workflow's http.poll trigger (Part 24): what was seen, the cursor, failures.
+/// Kept across versions; reset when the poll request or item identity changes.
+model HttpPollState {
+  id                  String     @id @default(uuid()) @db.Uuid
+  workspaceId         String     @db.Uuid
+  workflowId          String     @unique @db.Uuid
+  /// Hash of the request + item settings the state belongs to (a change resets it).
+  configHash          String
+  status              PollStatus @default(OK)
+  /// False until the first successful poll (which seeds without firing, by default).
+  seeded              Boolean    @default(false)
+  /// Recently seen item ids, newest last, bounded (see MAX_SEEN_IDS).
+  seenIds             Json       @default("[]")
+  lastCursor          String?
+  lastPolledAt        DateTime?  @db.Timestamptz(3)
+  lastSuccessAt       DateTime?  @db.Timestamptz(3)
+  lastError           String?
+  consecutiveFailures Int        @default(0)
+  /// While failing: polls before this time are skipped (backoff).
+  nextAttemptAt       DateTime?  @db.Timestamptz(3)
+  itemsFired          Int        @default(0)
+  createdAt           DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime   @updatedAt @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow  Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 // ── Execution history ────────────────────────────────────────────────────────

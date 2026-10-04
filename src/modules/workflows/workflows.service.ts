@@ -280,6 +280,34 @@ export class WorkflowsService {
     }
   }
 
+  /**
+   * http.poll trigger state (Part 24). `null` when the workflow has never polled. Seen item
+   * ids and cursor values stay internal: they can be data from the polled API.
+   */
+  async pollState(workspaceId: string, id: string) {
+    await this.findOwned(workspaceId, id);
+    const [state, schedule] = await Promise.all([
+      this.prisma.httpPollState.findFirst({
+        where: { workflowId: id, workspaceId },
+        select: {
+          status: true,
+          seeded: true,
+          lastPolledAt: true,
+          lastSuccessAt: true,
+          lastError: true,
+          consecutiveFailures: true,
+          nextAttemptAt: true,
+          itemsFired: true,
+        },
+      }),
+      this.prisma.workflowSchedule.findFirst({
+        where: { workflowId: id, workspaceId, kind: 'POLL' },
+        select: { active: true, description: true, nextRunAt: true },
+      }),
+    ]);
+    return { schedule, state };
+  }
+
   private async findOwned(workspaceId: string, id: string): Promise<Workflow> {
     const workflow = await this.prisma.workflow.findFirst({ where: { id, workspaceId } });
     if (!workflow) throw notFound();

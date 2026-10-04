@@ -44,7 +44,7 @@ function configKeys(schema: ZodTypeAny, prefix = ''): string[] {
  * send through the egress guard (src/infrastructure/egress). Any other URL-like setting must
  * first implement that policy and then be added to ALLOWED deliberately.
  */
-const ALLOWED: Record<string, string[]> = { 'http.request': ['url'] };
+const ALLOWED: Record<string, string[]> = { 'http.request': ['url'], 'http.poll': ['request.url'] };
 const policy = {
   allowPlainHttp: false,
   allowPrivateNetworks: false,
@@ -83,6 +83,12 @@ describe('no user-configurable outbound URLs (SSRF)', () => {
       'utf8',
     );
     expect(source).toMatch(/egress\.send\(/);
+    // http.poll fetches in the worker's poll runner, through the same guard.
+    const runner = readFileSync(join(__dirname, '../../execution/http-poll-runner.ts'), 'utf8');
+    expect(runner).toMatch(/egress\.send\(/);
+    expect(runner).not.toMatch(
+      /from 'node:(https?|net|tls)'|from '(axios|undici|got|node-fetch)'|\bfetch\(/,
+    );
     expect(source).not.toMatch(
       /from 'node:(https?|net|tls)'|from '(axios|undici|got|node-fetch)'|\bfetch\(/,
     );
